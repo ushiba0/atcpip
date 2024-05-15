@@ -100,18 +100,17 @@ impl Arp {
         }
     }
 
-    pub async fn build_arp_request_packet(ip: [u8;4]) ->  Self {
-
+    pub async fn build_arp_request_packet(ip: [u8; 4]) -> Self {
         let mut req = crate::arp::Arp::request_minimal();
         let my_mac = loop {
             if crate::interface::MY_MAC_ADDRESS.lock().await.is_some() {
                 break crate::interface::MY_MAC_ADDRESS.lock().await.unwrap();
             }
         };
-    
+
         req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         req.ethernet_header.source_mac_address = my_mac;
-    
+
         req.sender_mac_address = my_mac;
         req.sender_ip_address = crate::interface::MY_IP_ADDRESS;
         req.target_mac_address = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
@@ -173,9 +172,8 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
     }
 }
 
-pub async fn resolve_arp(ip: [u8;4]) -> [u8; 6] {
-
-    loop{
+pub async fn resolve_arp(ip: [u8; 4]) -> [u8; 6] {
+    loop {
         if let Some(mac) = ARP_TABLE.lock().await.get(&ip) {
             return *mac;
         } else {

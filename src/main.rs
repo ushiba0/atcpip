@@ -57,7 +57,6 @@ fn set_loglevel(cli_cmds: &CommandArguments) {
     env_logger::builder().format_timestamp_millis().init();
 }
 
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let cli_cmds = CommandArguments::parse();
@@ -66,7 +65,6 @@ async fn main() -> anyhow::Result<()> {
     // Datalink tx and rx from pnet crate.
     let (tx, rx) = crate::interface::get_channel().await?;
     let (iface_send, iface_recv) = broadcast::channel::<EthernetFrame>(2);
-
 
     let iface_send3 = iface_send.clone();
     crate::interface::spawn_tx_handler(iface_recv, iface_send3, tx, rx).await;
@@ -91,8 +89,7 @@ async fn main() -> anyhow::Result<()> {
         _ => unimplemented!(),
     }
 
-
-    match tokio::signal::ctrl_c().await{
+    match tokio::signal::ctrl_c().await {
         Ok(()) => {
             log::info!("Graceful Shutdown.");
         }

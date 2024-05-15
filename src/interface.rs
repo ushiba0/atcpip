@@ -39,9 +39,8 @@ pub async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkR
     Ok((tx, rx))
 }
 
-pub static SEND_HANDLE: Lazy<
-    Mutex<Option<tokio::sync::broadcast::Sender<EthernetFrame>>>,
-> = Lazy::new(|| Mutex::new(None));
+pub static SEND_HANDLE: Lazy<Mutex<Option<tokio::sync::broadcast::Sender<EthernetFrame>>>> =
+    Lazy::new(|| Mutex::new(None));
 
 pub async fn send_to_pnet(ethernet_frame: EthernetFrame) -> anyhow::Result<usize> {
     SEND_HANDLE
