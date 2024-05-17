@@ -85,6 +85,13 @@ async fn main() -> anyhow::Result<()> {
             log::info!("Destination IP Address: {ip:?}");
             tokio::spawn(async move { crate::pingcmd::main(ip).await })
         }
+        SecondCommand::Server => {
+            use tokio::time::{sleep, Duration};
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(1000 * 60)).await;
+                Ok(())
+            })
+        }
         _ => unimplemented!(),
     };
 

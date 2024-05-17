@@ -8,7 +8,7 @@ use crate::ethernet::EthernetFrame;
 
 pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
-pub const PNET_TXRX_TIMEOUT: u64 = 1000; // 1000 ms of timeout.
+pub const PNET_TXRX_TIMEOUT: u64 = 50; // 1000 ms of timeout.
 
 pub async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
     let interfaces = pnet::datalink::interfaces();
@@ -68,15 +68,23 @@ pub async fn spawn_tx_handler(
         use tokio::sync::broadcast;
         let (arp_rx_sender, arp_rx_receiver) = broadcast::channel::<crate::arp::Arp>(2);
 
+        // Ipv4 の受信を上のレイヤに伝えるチャネル.
+        let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<crate::ipv4::Ipv4Frame>(2);
+
         // ARP handler.
         tokio::spawn(async move {
             crate::arp::arp_handler(arp_rx_receiver).await;
         });
 
+        // IPv4 handler.
+        tokio::spawn(async move {
+            crate::ipv4::ipv4_handler(ipv4_rx_receiver).await;
+        });
+
         loop {
             tokio::task::yield_now().await;
-            // rx.next() はパケットが届かない場合は 1000 ms (PNET_TXRX_TIMEOUT) で timeout する。
-            // 逆にここで 1000 ms のブロックが発生する可能性がある。
+            // rx.next() はパケットが届かない場合は PNET_TXRX_TIMEOUT ms で timeout する。
+            // 逆にここで PNET_TXRX_TIMEOUT ms のブロックが発生する可能性がある。
             if let Ok(buf) = rx.next() {
                 let eth_frame = EthernetFrame::new(buf);
 
@@ -87,7 +95,8 @@ pub async fn spawn_tx_handler(
                         arp_rx_sender.send(arp).unwrap();
                     }
                     crate::ethernet::EtherType::Ipv4 => {
-                        // Not implemented.
+                        let ipv4frame = crate::ipv4::Ipv4Frame::from_buffer(&eth_frame.payload);
+                        ipv4_rx_sender.send(ipv4frame).unwrap();
                     }
                     _ => {}
                 }

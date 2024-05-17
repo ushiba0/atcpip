@@ -38,8 +38,8 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
     // Send ARP request packet every 1 sec.
     tokio::spawn(async move {
         loop {
-            // crate::ethernet::send_ethernet_frame(_e.clone()).await;
             e.send().await.unwrap();
+            println!("Sent ARP Request.");
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
     });
@@ -53,6 +53,7 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
                 .unwrap()
                 .resubscribe();
         }
+        tokio::task::yield_now().await;
     };
 
     let f = timeout(Duration::from_millis(10000), wait_arp_reply(arp_receiver)).await;

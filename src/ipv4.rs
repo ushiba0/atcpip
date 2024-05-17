@@ -1,3 +1,33 @@
+use once_cell::sync::Lazy;
+
+use tokio::sync::broadcast::{self, Receiver};
+use tokio::sync::Mutex;
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(u8)]
+pub enum Ipv4Protcol {
+    Null = 0xff,
+    #[default]
+    Icmp = 0x01,
+    // Reply = 0x0,
+}
+
+impl Ipv4Protcol {
+    pub fn from_u8(a: u8) -> Self {
+        match a {
+            0x01 => Self::Icmp,
+            // 0x0002u16 => Self::Reply,
+            _ => {
+                log::warn!("Unimplemented IPv4 protcol : {}", a);
+                Self::Null
+            }
+        }
+    }
+    // pub fn as_u8(self) -> u8 {
+    //     self as u8
+    // }
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct Ipv4Header {
     pub version_and_header_length: u8, // Default: 0b0100_0101
@@ -7,7 +37,7 @@ pub struct Ipv4Header {
     pub flags: u16, // Default: 0.
     pub time_to_live: u8,
     pub protocol: u8,
-    _header_checksum: u16, // Should always be zero. Checksum can be calc with
+    _header_checksum: u16, // Should always be zero. Checksum can be calc with self.get_checksum().
     pub source_address: [u8; 4],
     pub destination_address: [u8; 4],
 }
@@ -27,6 +57,21 @@ impl Ipv4Header {
             source_address: crate::interface::MY_IP_ADDRESS,
             total_length: 37,
             ..Default::default()
+        }
+    }
+
+    pub fn from_buffer(buf: &[u8]) -> Self {
+        Self {
+            version_and_header_length: buf[0],
+            differenciate_service_field: buf[1],
+            total_length: u16::from_be_bytes([buf[2], buf[3]]),
+            identification: u16::from_be_bytes([buf[4], buf[5]]),
+            flags: u16::from_be_bytes([buf[6], buf[7]]),
+            time_to_live: buf[8],
+            protocol: buf[9],
+            _header_checksum: u16::from_be_bytes([buf[10], buf[11]]),
+            source_address: [buf[12], buf[13], buf[14], buf[15]],
+            destination_address: [buf[16], buf[17], buf[18], buf[19]],
         }
     }
 
@@ -94,5 +139,46 @@ impl Ipv4Frame {
         let total_length = header_length + self.payload.len();
         self.header.total_length = total_length as u16;
         self.to_bytes()
+    }
+
+    pub fn from_buffer(buf: &Vec<u8>) -> Self {
+        Self {
+            header: Ipv4Header::from_buffer(&buf[..20]),
+            payload: buf[20..].to_vec(),
+        }
+    }
+}
+
+pub static IPV4_RECEIVER: Lazy<Mutex<Option<Receiver<Ipv4Frame>>>> = Lazy::new(Default::default);
+
+pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
+    *IPV4_RECEIVER.lock().await = Some(ipv4_receive.resubscribe());
+
+    // ICMP の襲来を通知するチャネル.
+    let (icmp_rx_sender, icmp_rx_receiver) = broadcast::channel::<Ipv4Frame>(2);
+
+    // Spawn ICMP handler.
+    tokio::spawn(async move {
+        crate::icmp::icmp_handler(icmp_rx_receiver).await;
+    });
+
+    loop {
+        let ipv4frame = ipv4_receive.recv().await.unwrap();
+
+        // Todo: Checksum と Total length の計算.
+        // Todo: 自分宛ての IP Address か確かめる。
+
+        let protcol = Ipv4Protcol::from_u8(ipv4frame.header.protocol);
+        match protcol {
+            Ipv4Protcol::Icmp => {
+                println!("Received IPv4 ICMP packet: {:?}", ipv4frame);
+                // let icmp = crate::icmp::Icmp::from_buffer(&ipv4frame.payload);
+                icmp_rx_sender.send(ipv4frame).unwrap();
+            }
+
+            _ => {
+                log::warn!("Uninplemented.");
+            }
+        }
     }
 }

@@ -48,6 +48,7 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
                 .unwrap()
                 .resubscribe();
         }
+        tokio::task::yield_now().await;
     };
 
     let f = timeout(Duration::from_millis(10000), wait_arp_reply(arp_receiver)).await;
