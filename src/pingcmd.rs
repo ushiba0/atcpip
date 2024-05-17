@@ -1,10 +1,7 @@
 use std::net::Ipv4Addr;
 
 use tokio::sync::broadcast::Receiver;
-use tokio::sync::broadcast::Sender;
-use tokio::time::{timeout, Duration};
-
-use crate::ethernet::EthernetFrame;
+use tokio::time::{sleep, timeout, Duration};
 
 async fn wait_arp_reply(mut arp_receiver: Receiver<crate::arp::Arp>) -> anyhow::Result<()> {
     loop {
@@ -25,8 +22,7 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
 
     echo_reqest.identifier = 0;
     echo_reqest.seqence_number = 0;
-    echo_reqest.data = vec![0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69];
-
+    echo_reqest.data = vec![0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x70];
 
     let mut ipv4_icmp_echo_req_frame = crate::ipv4::Ipv4Frame::minimal();
     ipv4_icmp_echo_req_frame.header.destination_address = ip.octets();
@@ -34,13 +30,12 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
 
     log::debug!("ICMP Echo Request packet: {:x?}", ipv4_icmp_echo_req_frame);
 
-    // Send ARP request packet every 1 sec.
+    // Send ICMP Echo request packet every 1 sec.
     tokio::spawn(async move {
         loop {
-            // iface_send.send(_e.clone()).unwrap();
-            log::error!("Send icmp echo request: {:x?}", ipv4_icmp_echo_req_frame);
-            ipv4_icmp_echo_req_frame.send().await;
-            tokio::time::sleep(Duration::from_millis(1000)).await;
+            log::trace!("Send icmp echo request: {:x?}", ipv4_icmp_echo_req_frame);
+            ipv4_icmp_echo_req_frame.send().await.unwrap();
+            sleep(Duration::from_millis(1000)).await;
         }
     });
 

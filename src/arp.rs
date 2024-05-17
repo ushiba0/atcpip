@@ -140,7 +140,7 @@ async fn send_arp_reply(arp_req: Arp) {
     // Todo.
     // Sender IP, Sender MAC を MAC アドレステーブルにいれる。
 
-    crate::ethernet::send_ethernet_frame(arp_reply.to_ethernet_frame()).await;
+    arp_reply.to_ethernet_frame().send().await.unwrap();
     log::trace!("Sent an Arp reply: {arp_reply:?}");
 }
 
@@ -181,7 +181,7 @@ pub async fn resolve_arp(ip: [u8; 4]) -> [u8; 6] {
             log::trace!("Resolving IP: {ip:x?}");
             let arp_req = Arp::build_arp_request_packet(ip).await;
             let eth_frame = arp_req.to_ethernet_frame();
-            eth_frame.send().await;
+            eth_frame.send().await.unwrap();
             tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
         }
     }

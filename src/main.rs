@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use crate::ethernet::EthernetFrame;
+use std::net::Ipv4Addr;
 use tokio::sync::broadcast::{self};
 
 mod arp;
@@ -57,7 +58,8 @@ fn set_loglevel(cli_cmds: &CommandArguments) {
     env_logger::builder().format_timestamp_millis().init();
 }
 
-#[tokio::main(flavor = "current_thread")]
+// #[tokio::main(flavor = "current_thread")]
+#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
 async fn main() -> anyhow::Result<()> {
     let cli_cmds = CommandArguments::parse();
     set_loglevel(&cli_cmds);
@@ -69,29 +71,32 @@ async fn main() -> anyhow::Result<()> {
     let iface_send3 = iface_send.clone();
     crate::interface::spawn_tx_handler(iface_recv, iface_send3, tx, rx).await;
 
-    use std::net::Ipv4Addr;
-
-    match cli_cmds.second_command {
+    let handle = match cli_cmds.second_command {
         SecondCommand::Arping(opts) => {
             // Call arping.
             let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
             log::info!("Destination IP Address: {ip:?}");
-            crate::arping::main(ip).await?;
-            std::process::exit(0);
+
+            tokio::spawn(async move { crate::arping::main(ip).await })
+            // std::process::exit(0);
         }
         SecondCommand::Ping(opts) => {
             let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
             log::info!("Destination IP Address: {ip:?}");
-            crate::pingcmd::main(ip).await?;
-            std::process::exit(0);
+            tokio::spawn(async move { crate::pingcmd::main(ip).await })
         }
-        SecondCommand::Server => {}
         _ => unimplemented!(),
-    }
+    };
+
+    tokio::spawn(async move {
+        let result = handle.await;
+        log::info!("{result:?}");
+        std::process::exit(0);
+    });
 
     match tokio::signal::ctrl_c().await {
         Ok(()) => {
-            log::info!("Graceful Shutdown.");
+            log::info!("Signal received. Graceful Shutdown.");
         }
         Err(err) => {
             eprintln!("Unable to listen for shutdown signal: {}", err);

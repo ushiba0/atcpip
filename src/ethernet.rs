@@ -77,9 +77,9 @@ impl EthernetFrame {
         Self { header, payload }
     }
 
-    pub fn minimal() -> Self {
-        Self::new(&Vec::new())
-    }
+    // pub fn minimal() -> Self {
+    //     Self::new(&Vec::new())
+    // }
 
     pub fn build_to_packet(&self) -> Vec<u8> {
         let mut packet: Vec<u8> = Vec::new();
@@ -89,15 +89,12 @@ impl EthernetFrame {
     }
 
     pub fn to_arp(&self) -> anyhow::Result<crate::arp::Arp> {
-        Ok(crate::arp::Arp::from_eth_header_and_payload(
-            &self.header,
-            &self.payload,
-        )?)
+        crate::arp::Arp::from_eth_header_and_payload(&self.header, &self.payload)
     }
 
-    pub async fn send(&self) {
+    pub async fn send(&self) -> anyhow::Result<usize> {
         let f = self.clone();
-        send_ethernet_frame(f).await;
+        send_ethernet_frame(f).await
     }
 }
 
@@ -110,7 +107,7 @@ pub async fn send_ethernet_frame(
 // 設計思想:
 // 1 つ上にどんなレイヤがあるかは知っておく必要がある。
 // 下にどんなレイヤがあるかは全く知る必要がない。
-pub async fn send_ipv4(ipv4_frame: crate::ipv4::Ipv4Frame) -> anyhow::Result<()> {
+pub async fn send_ipv4(ipv4_frame: crate::ipv4::Ipv4Frame) -> anyhow::Result<usize> {
     let destination_ip = ipv4_frame.header.destination_address;
     let eth_header = EthernetHeader {
         destination_mac_address: crate::arp::resolve_arp(destination_ip).await,
@@ -121,10 +118,8 @@ pub async fn send_ipv4(ipv4_frame: crate::ipv4::Ipv4Frame) -> anyhow::Result<()>
     let ether_frame = EthernetFrame {
         header: eth_header,
         // payload: ipv4_frame.to_bytes(),
-        payload: ipv4_frame.build_to_bytes(),
+        payload: ipv4_frame.clone().build_to_bytes(),
     };
 
-    ether_frame.send().await;
-
-    Ok(())
+    ether_frame.send().await
 }

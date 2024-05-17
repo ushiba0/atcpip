@@ -62,8 +62,7 @@ impl Icmp {
     }
 }
 
-
-pub fn calc_checksum(data: &[u8]) -> u16{
+pub fn calc_checksum(data: &[u8]) -> u16 {
     let mut sum = 0usize;
     let mut chunks = data.chunks_exact(2);
 
@@ -74,7 +73,7 @@ pub fn calc_checksum(data: &[u8]) -> u16{
     }
 
     // data.len() が奇数長の場合は最後の 1 バイトを処理する.
-    if let Some(&last_byte) = chunks.remainder().get(0){
+    if let Some(&last_byte) = chunks.remainder().first() {
         let part = u16::from_be_bytes([last_byte, 0]);
         sum = sum.wrapping_add(part as usize);
     }
