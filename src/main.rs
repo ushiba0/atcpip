@@ -59,7 +59,7 @@ fn set_loglevel(cli_cmds: &CommandArguments) {
 }
 
 // #[tokio::main(flavor = "current_thread")]
-#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> anyhow::Result<()> {
     let cli_cmds = CommandArguments::parse();
     set_loglevel(&cli_cmds);

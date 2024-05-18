@@ -8,7 +8,7 @@ use crate::ethernet::EthernetFrame;
 
 pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
-pub const PNET_TXRX_TIMEOUT: u64 = 50; // 1000 ms of timeout.
+pub const PNET_TXRX_TIMEOUT: u64 = 50; 
 
 pub async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
     let interfaces = pnet::datalink::interfaces();
