@@ -1,5 +1,7 @@
 const ETHERNET_FRAME_SIZE: usize = 1500;
 
+use crate::layer2::arp::Arp;
+
 #[derive(Debug, Default, PartialEq, Clone, Copy)]
 #[repr(u16)]
 pub enum EtherType {
@@ -88,8 +90,8 @@ impl EthernetFrame {
         packet
     }
 
-    pub fn to_arp(&self) -> anyhow::Result<crate::arp::Arp> {
-        crate::arp::Arp::from_eth_header_and_payload(&self.header, &self.payload)
+    pub fn to_arp(&self) -> anyhow::Result<Arp> {
+        Arp::from_eth_header_and_payload(&self.header, &self.payload)
     }
 
     pub async fn send(&self) -> anyhow::Result<usize> {
@@ -110,7 +112,7 @@ pub async fn send_ethernet_frame(
 pub async fn send_ipv4(ipv4_frame: crate::ipv4::Ipv4Frame) -> anyhow::Result<usize> {
     let destination_ip = ipv4_frame.header.destination_address;
     let eth_header = EthernetHeader {
-        destination_mac_address: crate::arp::resolve_arp(destination_ip).await,
+        destination_mac_address: crate::layer2::arp::resolve_arp(destination_ip).await,
         source_mac_address: crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone),
         ethernet_type: EtherType::Ipv4.as_u16(),
     };

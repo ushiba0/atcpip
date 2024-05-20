@@ -65,12 +65,13 @@ pub async fn spawn_tx_handler() {
 
         // ARP ハンドラスレッドを spawn し、 ARP ハンドラスレッドに通知する用の Sender を返す。
         let arp_rx_sender = {
+            use crate::layer2::arp::{Arp, arp_handler};
             // ARP packet が来たら、この channel で上のレイヤに通知する。
-            let (arp_rx_sender, arp_rx_receiver) = broadcast::channel::<crate::arp::Arp>(2);
+            let (arp_rx_sender, arp_rx_receiver) = broadcast::channel::<Arp>(2);
 
             // Spawn ARP handler.
             tokio::spawn(async move {
-                crate::arp::arp_handler(arp_rx_receiver).await;
+                arp_handler(arp_rx_receiver).await;
             });
             arp_rx_sender
         };

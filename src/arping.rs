@@ -3,10 +3,10 @@ use std::net::Ipv4Addr;
 use tokio::sync::broadcast::Receiver;
 use tokio::time::{timeout, Duration};
 
-async fn wait_arp_reply(mut arp_receiver: Receiver<crate::arp::Arp>) -> anyhow::Result<()> {
+async fn wait_arp_reply(mut arp_receiver: Receiver<crate::layer2::arp::Arp>) -> anyhow::Result<()> {
     loop {
         let arp = arp_receiver.recv().await?;
-        if arp.opcode == crate::arp::ArpOpCode::Reply as u16 {
+        if arp.opcode == crate::layer2::arp::ArpOpCode::Reply as u16 {
             println!(
                 "ARP REPLY: {:?} is at {:x?}",
                 arp.sender_ip_address, arp.sender_mac_address
@@ -16,7 +16,7 @@ async fn wait_arp_reply(mut arp_receiver: Receiver<crate::arp::Arp>) -> anyhow::
 }
 
 pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
-    let mut req = crate::arp::Arp::request_minimal();
+    let mut req = crate::layer2::arp::Arp::request_minimal();
     let my_mac = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
 
     req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
@@ -39,7 +39,7 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
         }
     });
     
-    let arp_receiver = crate::unwrap_or_yield!(crate::arp::ARP_RECEIVER, resubscribe);
+    let arp_receiver = crate::unwrap_or_yield!(crate::layer2::arp::ARP_RECEIVER, resubscribe);
     let f = timeout(Duration::from_millis(10000), wait_arp_reply(arp_receiver)).await;
 
     match f {

@@ -2,7 +2,6 @@ use clap::{Parser, Subcommand};
 
 use std::net::Ipv4Addr;
 
-mod arp;
 mod arping;
 // mod ethernet;
 mod icmp;
