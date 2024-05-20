@@ -58,30 +58,6 @@ fn set_loglevel(cli_cmds: &CommandArguments) {
     env_logger::builder().format_timestamp_millis().init();
 }
 
-trait OptionExt<T> {
-    async fn unwrap_or_yield(self) -> T;
-}
-
-impl<T> OptionExt<T> for Option<T> {
-    async fn unwrap_or_yield( self) -> T {
-        const COUNT_WARN_THRESHOULD: usize = 10usize;
-        let mut count = 0usize;
-        loop {
-            if let Some(value) = self {
-                return value;
-            } else {
-                // tokio::task::yield_now().await;
-                use tokio::time::{sleep, Duration};
-                    sleep(Duration::from_millis(20)).await;
-            }
-            count += 1;
-            if count > COUNT_WARN_THRESHOULD {
-                log::warn!("{:?}", anyhow::anyhow!("spin!!!!!!!"));
-            }
-        }
-    }
-}
-
 // #[tokio::main(flavor = "current_thread")]
 #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
 async fn main() -> anyhow::Result<()> {

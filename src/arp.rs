@@ -7,7 +7,6 @@ use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
 use crate::ethernet::EthernetFrame;
-use crate::OptionExt;
 
 pub static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
 
