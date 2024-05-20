@@ -1,8 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use crate::ethernet::EthernetFrame;
 use std::net::Ipv4Addr;
-use tokio::sync::broadcast::{self};
 
 mod arp;
 mod arping;
@@ -31,7 +29,7 @@ struct CommandArguments {
 enum SecondCommand {
     /// Send ARP requests.
     Arping(PingCLIOpts),
-    /// ICMP Ping を送信する.
+    /// Send ICMP Echo requests.
     Ping(PingCLIOpts),
     /// TCP Server.
     Server,
@@ -64,12 +62,7 @@ async fn main() -> anyhow::Result<()> {
     let cli_cmds = CommandArguments::parse();
     set_loglevel(&cli_cmds);
 
-    // Datalink tx and rx from pnet crate.
-    let (tx, rx) = crate::interface::get_channel().await?;
-    let (iface_send, iface_recv) = broadcast::channel::<EthernetFrame>(2);
-
-    let iface_send3 = iface_send.clone();
-    crate::interface::spawn_tx_handler(iface_recv, iface_send3, tx, rx).await;
+    crate::interface::spawn_tx_handler().await;
 
     let handle = match cli_cmds.second_command {
         SecondCommand::Arping(opts) => {
@@ -97,18 +90,33 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::spawn(async move {
         let result = handle.await;
-        log::info!("{result:?}");
+        log::info!("Command result: {result:?}");
         std::process::exit(0);
     });
 
+    // Call an shutdown handler,
     match tokio::signal::ctrl_c().await {
         Ok(()) => {
             log::info!("Signal received. Graceful Shutdown.");
+            Ok(())
         }
         Err(err) => {
             eprintln!("Unable to listen for shutdown signal: {}", err);
+            Err(anyhow::anyhow!("{err:?}"))
         }
     }
+}
 
-    Ok(())
+
+#[macro_export]
+macro_rules! lock_unwrap_or_yield {
+    ($global_var:expr, $method:ident) => {
+        loop {
+            let a = $global_var.lock().await;
+            match a.as_ref() {
+                Some(value) => break value.$method(),
+                None => tokio::task::yield_now().await
+            }
+        }
+    };
 }

@@ -8,7 +8,7 @@ use tokio::time::{timeout, Duration};
 
 use crate::ethernet::EthernetFrame;
 
-pub static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
+ static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u16)]
@@ -90,7 +90,7 @@ impl Arp {
 
     pub async fn build_arp_request_packet(ip: [u8; 4]) -> Self {
         let mut req = crate::arp::Arp::request_minimal();
-        let my_mac = crate::interface::get_my_mac_address().await;
+        let my_mac = crate::lock_unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
 
         req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         req.ethernet_header.source_mac_address = my_mac;
@@ -112,11 +112,11 @@ async fn send_arp_reply(arp_req: Arp) {
 
     // Set ethernet header.
     arp_reply.ethernet_header.destination_mac_address = arp_req.ethernet_header.source_mac_address;
-    arp_reply.ethernet_header.source_mac_address = crate::interface::get_my_mac_address().await;
+    arp_reply.ethernet_header.source_mac_address = crate::lock_unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
 
     // Set arp payload.
     arp_reply.opcode = ArpOpCode::Reply as u16;
-    arp_reply.sender_mac_address = crate::interface::get_my_mac_address().await;
+    arp_reply.sender_mac_address = crate::lock_unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
     arp_reply.sender_ip_address = crate::interface::MY_IP_ADDRESS;
     arp_reply.target_mac_address = arp_req.sender_mac_address;
     arp_reply.target_ip_address = arp_req.sender_ip_address;
@@ -169,43 +169,36 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
     }
 }
 
-
-
 pub async fn resolve_arp(ip: [u8; 4]) -> [u8; 6] {
-    let mut arp_reply_notifier = {
-        loop {
-            if let Some(aa) = ARP_REPLY_NOTIFIER.lock().await.as_ref() {
-                break aa.resubscribe();
-            }
-            tokio::task::yield_now().await;
-        }
-    };
-    // let mut arp_reply_notifier = ARP_REPLY_NOTIFIER
-    //     .lock()
-    //     .await
-    //     .as_ref()
-    //     .unwrap_or_yield()
-    //     .await
-    //     .resubscribe();
+    let mut arp_reply_notifier = crate::lock_unwrap_or_yield!(ARP_REPLY_NOTIFIER, resubscribe);
+    let mut count = 0;
+    const LOOP_COUNT_THRESHOULD: usize = 100;
     loop {
         if let Some(&mac) = ARP_TABLE.lock().await.get(&ip) {
+            log::trace!("IP: {ip:x?} was resolved to MAC: {mac:x?}" );
             return mac;
         } else {
             // Resolve ARP.
-            log::trace!("Resolving IP: {ip:x?}");
+            log::trace!("Sending ARP reqest for {ip:x?}");
             let arp_req = Arp::build_arp_request_packet(ip).await;
             let eth_frame = arp_req.to_ethernet_frame();
             eth_frame.send().await.unwrap();
-            // tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
-            let res = timeout(Duration::from_millis(10), arp_reply_notifier.recv()).await;
+            // timeout の戻り値は Result<Result<bool, RecvError>, Elapsed>.
+            // Ok の場合は arp reply (とは限らないが何かしらの arp) が帰ってきているので、次の loop で値を取り出す。
+            // Err の場合は timeout したということだが、その場合は CPU を別スレッドに一度明け渡す。
+            let res = timeout(Duration::from_millis(5), arp_reply_notifier.recv()).await;
             match res {
-                Ok(_)=>continue, // got an arp reply. 次の loop で arp table を見に行けば Arp 解決できる。
-                Err(_) => {
-                    tokio::task::yield_now().await;
-                    continue;
-                },
+                Ok(_) => {}
+                Err(_) => tokio::task::yield_now().await,
             }
+        }
+        count += 1;
+        if count >= LOOP_COUNT_THRESHOULD {
+            log::warn!(
+                "[resolve_arp] Exceeded loop count threshould during ARP resolving {:x?}",
+                ip
+            );
         }
     }
 }

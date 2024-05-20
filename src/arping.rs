@@ -11,14 +11,13 @@ async fn wait_arp_reply(mut arp_receiver: Receiver<crate::arp::Arp>) -> anyhow::
                 "ARP REPLY: {:?} is at {:x?}",
                 arp.sender_ip_address, arp.sender_mac_address
             );
-            //return Ok(());
         }
     }
 }
 
 pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
     let mut req = crate::arp::Arp::request_minimal();
-    let my_mac = crate::interface::get_my_mac_address().await;
+    let my_mac = crate::lock_unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
 
     req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
     req.ethernet_header.source_mac_address = my_mac;
@@ -39,19 +38,8 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
     });
-
-    let arp_receiver = loop {
-        if crate::arp::ARP_RECEIVER.lock().await.is_some() {
-            break crate::arp::ARP_RECEIVER
-                .lock()
-                .await
-                .as_ref()
-                .unwrap()
-                .resubscribe();
-        }
-        tokio::task::yield_now().await;
-    };
-
+    
+    let arp_receiver = crate::lock_unwrap_or_yield!(crate::arp::ARP_RECEIVER, resubscribe);
     let f = timeout(Duration::from_millis(10000), wait_arp_reply(arp_receiver)).await;
 
     match f {

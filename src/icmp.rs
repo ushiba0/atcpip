@@ -7,7 +7,7 @@ pub enum IcmpType {
     Reply = 0x0,
     Request = 0x08u8,
     #[default]
-    Unimplemented = 0xff,
+    Invalid = 0xff,
 }
 
 #[derive(Default, Debug, Clone)]

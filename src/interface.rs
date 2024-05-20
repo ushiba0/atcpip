@@ -7,23 +7,14 @@ use tokio::sync::Mutex;
 
 use crate::ethernet::EthernetFrame;
 
-static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
+pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
 const PNET_TX_TIMEOUT_MICROSEC: u64 = 1000 * 10; // 10 ms.
 const PNET_RX_TIMEOUT_MICROSEC: u64 = 1000 * 100; // 100 ms.
 static SEND_HANDLE: Lazy<Mutex<Option<tokio::sync::broadcast::Sender<EthernetFrame>>>> =
     Lazy::new(|| Mutex::new(None));
 
-pub async fn get_my_mac_address() -> [u8; 6] {
-    loop {
-        if let Some(&mac) = MY_MAC_ADDRESS.lock().await.as_ref() {
-            return mac;
-        }
-        tokio::task::yield_now().await;
-    }
-}
-
-pub async fn get_channel() -> anyhow::Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
+async fn get_channel() -> anyhow::Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
     let interfaces = pnet::datalink::interfaces();
     log::trace!("Network interfaces on this host: {:?}", interfaces);
 
@@ -62,18 +53,17 @@ pub async fn send_to_pnet(ethernet_frame: EthernetFrame) -> anyhow::Result<usize
         .context("[send_to_pnet] Send to pnet tx error.")
 }
 
-pub async fn spawn_tx_handler(
-    mut iface_recv: tokio::sync::broadcast::Receiver<EthernetFrame>,
-    iface_send: tokio::sync::broadcast::Sender<EthernetFrame>,
-    mut tx: Box<dyn DataLinkSender>,
-    mut rx: Box<dyn DataLinkReceiver>,
-) {
+pub async fn spawn_tx_handler() {
+    let (iface_send, mut iface_recv) = broadcast::channel::<EthernetFrame>(2);
+    let (mut tx, mut rx) = get_channel().await.unwrap();
+
     *SEND_HANDLE.lock().await = Some(iface_send);
 
     // Datalink Rx.
     tokio::spawn(async move {
         log::info!("Spawned Datalink Rx handler.");
 
+        // ARP ハンドラスレッドを spawn し、 ARP ハンドラスレッドに通知する用の Sender を返す。
         let arp_rx_sender = {
             // ARP packet が来たら、この channel で上のレイヤに通知する。
             let (arp_rx_sender, arp_rx_receiver) = broadcast::channel::<crate::arp::Arp>(2);
@@ -85,6 +75,7 @@ pub async fn spawn_tx_handler(
             arp_rx_sender
         };
 
+        // IPv4 ハンドラスレッドを spawn し、 IPv4 ハンドラスレッドに通知する用の Sender を返す。
         let ipv4_rx_sender = {
             // Ipv4 の受信を上のレイヤに伝えるチャネル.
             let (ipv4_rx_sender, ipv4_rx_receiver) =
@@ -99,8 +90,8 @@ pub async fn spawn_tx_handler(
 
         loop {
             tokio::task::yield_now().await;
-            // rx.next() はパケットが届かない場合は PNET_TXRX_TIMEOUT ms で timeout する。
-            // 逆にここで PNET_TXRX_TIMEOUT ms のブロックが発生する可能性がある。
+            // rx.next() はパケットが届かない場合は PNET_RX_TIMEOUT_MICROSEC ms で timeout する。
+            // 逆にここで PNET_RX_TIMEOUT_MICROSEC ms のブロックが発生する可能性がある。
             if let Ok(buf) = rx.next() {
                 let eth_frame = EthernetFrame::new(buf);
 
@@ -126,7 +117,6 @@ pub async fn spawn_tx_handler(
         while let Ok(eth_frame) = iface_recv.recv().await {
             let packet = eth_frame.build_to_packet();
             tx.send_to(&packet, None);
-            log::trace!("Sent {packet:x?}");
         }
     });
 }

@@ -134,7 +134,7 @@ impl Ipv4Frame {
     }
 }
 
-pub static IPV4_RECEIVER: Lazy<Mutex<Option<Receiver<Ipv4Frame>>>> = Lazy::new(Default::default);
+ static IPV4_RECEIVER: Lazy<Mutex<Option<Receiver<Ipv4Frame>>>> = Lazy::new(Default::default);
 
 pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
     *IPV4_RECEIVER.lock().await = Some(ipv4_receive.resubscribe());

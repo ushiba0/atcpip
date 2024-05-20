@@ -1,20 +1,6 @@
 use std::net::Ipv4Addr;
 
-use tokio::sync::broadcast::Receiver;
-use tokio::time::{sleep, timeout, Duration};
-
-async fn wait_arp_reply(mut arp_receiver: Receiver<crate::arp::Arp>) -> anyhow::Result<()> {
-    loop {
-        let arp = arp_receiver.recv().await?;
-        if arp.opcode == crate::arp::ArpOpCode::Reply as u16 {
-            println!(
-                "ARP REPLY: {:?} is at {:x?}",
-                arp.sender_ip_address, arp.sender_mac_address
-            );
-            //return Ok(());
-        }
-    }
-}
+use tokio::time::{sleep, Duration};
 
 pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
     // let mut req = crate::arp::Arp::request_minimal();
@@ -38,23 +24,7 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
             sleep(Duration::from_millis(1000)).await;
         }
     });
-
-    let arp_receiver = loop {
-        if crate::arp::ARP_RECEIVER.lock().await.is_some() {
-            break crate::arp::ARP_RECEIVER
-                .lock()
-                .await
-                .as_ref()
-                .unwrap()
-                .resubscribe();
-        }
-        tokio::task::yield_now().await;
-    };
-
-    let f = timeout(Duration::from_millis(10000), wait_arp_reply(arp_receiver)).await;
-
-    match f {
-        Ok(v) => v,
-        Err(_) => Err(anyhow::anyhow!("Timeout.")),
-    }
+    
+    sleep(Duration::from_millis(10 * 1000)).await;
+    Ok(())
 }
