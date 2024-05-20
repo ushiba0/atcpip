@@ -110,7 +110,7 @@ impl Ipv4Frame {
     }
 
     pub async fn send(&self) -> anyhow::Result<usize> {
-        crate::ethernet::send_ipv4(self.clone()).await
+        crate::layer2::ethernet::send_ipv4(self.clone()).await
     }
 
     // Calculate checksum, fill total_length

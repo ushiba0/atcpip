@@ -6,7 +6,7 @@ use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
-use crate::ethernet::EthernetFrame;
+use crate::layer2::ethernet::{EthernetFrame, EthernetHeader, EtherType};
 
  static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
 
@@ -21,8 +21,7 @@ pub enum ArpOpCode {
 
 #[derive(Default, Debug, Clone)]
 pub struct Arp {
-    pub ethernet_header: crate::ethernet::EthernetHeader,
-
+    pub ethernet_header: EthernetHeader,
     pub hardware_type: u16,          // 0x0001: Ethernet
     pub protcol_type: u16,           // 0x0800: IPv4
     pub hardware_address_length: u8, // 0x06: Length of MAC address.
@@ -36,7 +35,7 @@ pub struct Arp {
 
 impl Arp {
     pub fn from_eth_header_and_payload(
-        eth_header: &crate::ethernet::EthernetHeader,
+        eth_header: &EthernetHeader,
         payload: &[u8],
     ) -> anyhow::Result<Self> {
         Ok(Self {
@@ -54,8 +53,8 @@ impl Arp {
     }
 
     pub fn request_minimal() -> Self {
-        let ethernet_header = crate::ethernet::EthernetHeader {
-            ethernet_type: crate::ethernet::EtherType::Arp.as_u16(),
+        let ethernet_header: EthernetHeader = EthernetHeader {
+            ethernet_type: EtherType::Arp.as_u16(),
             ..Default::default()
         };
         Self {

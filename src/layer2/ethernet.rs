@@ -99,7 +99,7 @@ impl EthernetFrame {
 }
 
 pub async fn send_ethernet_frame(
-    ethernet_frame: crate::ethernet::EthernetFrame,
+    ethernet_frame: EthernetFrame,
 ) -> anyhow::Result<usize> {
     crate::interface::send_to_pnet(ethernet_frame).await
 }

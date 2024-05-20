@@ -5,7 +5,7 @@ use pnet::datalink::{Config, DataLinkReceiver, DataLinkSender};
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 
-use crate::ethernet::EthernetFrame;
+use crate::layer2::ethernet::{EthernetFrame,EtherType};
 
 pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
@@ -96,12 +96,12 @@ pub async fn spawn_tx_handler() {
                 let eth_frame = EthernetFrame::new(buf);
 
                 // EtherType を見て Arp handler, IPv4 handler に渡す。
-                match crate::ethernet::EtherType::from_u16(eth_frame.header.ethernet_type) {
-                    crate::ethernet::EtherType::Arp => {
+                match EtherType::from_u16(eth_frame.header.ethernet_type) {
+                    EtherType::Arp => {
                         let arp = eth_frame.to_arp().unwrap();
                         arp_rx_sender.send(arp).unwrap();
                     }
-                    crate::ethernet::EtherType::Ipv4 => {
+                    EtherType::Ipv4 => {
                         let ipv4frame = crate::ipv4::Ipv4Frame::from_buffer(&eth_frame.payload);
                         ipv4_rx_sender.send(ipv4frame).unwrap();
                     }

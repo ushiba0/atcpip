@@ -4,11 +4,13 @@ use std::net::Ipv4Addr;
 
 mod arp;
 mod arping;
-mod ethernet;
+// mod ethernet;
 mod icmp;
 mod interface;
 mod ipv4;
 mod pingcmd;
+
+mod layer2;
 
 #[derive(Debug, Parser)]
 struct CommandArguments {
