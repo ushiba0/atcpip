@@ -1,6 +1,8 @@
 use num_traits::FromPrimitive;
 use tokio::sync::broadcast::Receiver;
 
+use crate::layer3::ipv4::{Ipv4Header,Ipv4Frame};
+
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u8)]
 pub enum IcmpType {
@@ -91,7 +93,7 @@ pub fn calc_checksum(data: &[u8]) -> u16 {
 }
 
 async fn send_icmp_echo_reply(
-    ipv4header: crate::ipv4::Ipv4Header,
+    ipv4header: Ipv4Header,
     icmp: Icmp,
 ) -> anyhow::Result<()> {
     let mut echo_reply = crate::icmp::Icmp::echo_reqest_minimal();
@@ -101,7 +103,7 @@ async fn send_icmp_echo_reply(
     echo_reply.seqence_number = icmp.seqence_number;
     echo_reply.data = icmp.data;
 
-    let mut ipv4_icmp_echo_reply_frame = crate::ipv4::Ipv4Frame::minimal();
+    let mut ipv4_icmp_echo_reply_frame = Ipv4Frame::minimal();
     ipv4_icmp_echo_reply_frame.header.destination_address = ipv4header.source_address;
     ipv4_icmp_echo_reply_frame.payload = echo_reply.build_to_bytes();
 
@@ -111,7 +113,7 @@ async fn send_icmp_echo_reply(
     Ok(())
 }
 
-pub async fn icmp_handler(mut icmp_receive: Receiver<crate::ipv4::Ipv4Frame>) {
+pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Frame>) {
     // 必要にであれば icmp_receive をクローンして Global 変数として保存する。
     // いまは必要ないためそうしていない。
 

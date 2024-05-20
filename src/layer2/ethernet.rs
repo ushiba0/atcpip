@@ -109,7 +109,7 @@ pub async fn send_ethernet_frame(
 // 設計思想:
 // 1 つ上にどんなレイヤがあるかは知っておく必要がある。
 // 下にどんなレイヤがあるかは全く知る必要がない。
-pub async fn send_ipv4(ipv4_frame: crate::ipv4::Ipv4Frame) -> anyhow::Result<usize> {
+pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> anyhow::Result<usize> {
     let destination_ip = ipv4_frame.header.destination_address;
     let eth_header = EthernetHeader {
         destination_mac_address: crate::layer2::arp::resolve_arp(destination_ip).await,

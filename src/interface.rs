@@ -6,6 +6,7 @@ use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 
 use crate::layer2::ethernet::{EthernetFrame,EtherType};
+use crate::layer3::ipv4::Ipv4Frame;
 
 pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
@@ -80,11 +81,11 @@ pub async fn spawn_tx_handler() {
         let ipv4_rx_sender = {
             // Ipv4 の受信を上のレイヤに伝えるチャネル.
             let (ipv4_rx_sender, ipv4_rx_receiver) =
-                broadcast::channel::<crate::ipv4::Ipv4Frame>(2);
+                broadcast::channel::<Ipv4Frame>(2);
 
             // Spawn IPv4 handler.
             tokio::spawn(async move {
-                crate::ipv4::ipv4_handler(ipv4_rx_receiver).await;
+                crate::layer3::ipv4::ipv4_handler(ipv4_rx_receiver).await;
             });
             ipv4_rx_sender
         };
@@ -103,7 +104,7 @@ pub async fn spawn_tx_handler() {
                         arp_rx_sender.send(arp).unwrap();
                     }
                     EtherType::Ipv4 => {
-                        let ipv4frame = crate::ipv4::Ipv4Frame::from_buffer(&eth_frame.payload);
+                        let ipv4frame = Ipv4Frame::from_buffer(&eth_frame.payload);
                         ipv4_rx_sender.send(ipv4frame).unwrap();
                     }
                     _ => {}
