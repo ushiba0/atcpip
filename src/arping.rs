@@ -17,7 +17,7 @@ async fn wait_arp_reply(mut arp_receiver: Receiver<crate::arp::Arp>) -> anyhow::
 
 pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
     let mut req = crate::arp::Arp::request_minimal();
-    let my_mac = crate::lock_unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
+    let my_mac = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
 
     req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
     req.ethernet_header.source_mac_address = my_mac;
@@ -39,7 +39,7 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
         }
     });
     
-    let arp_receiver = crate::lock_unwrap_or_yield!(crate::arp::ARP_RECEIVER, resubscribe);
+    let arp_receiver = crate::unwrap_or_yield!(crate::arp::ARP_RECEIVER, resubscribe);
     let f = timeout(Duration::from_millis(10000), wait_arp_reply(arp_receiver)).await;
 
     match f {

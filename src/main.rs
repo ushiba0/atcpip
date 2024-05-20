@@ -109,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
 
 
 #[macro_export]
-macro_rules! lock_unwrap_or_yield {
+macro_rules! unwrap_or_yield {
     ($global_var:expr, $method:ident) => {
         loop {
             let a = $global_var.lock().await;

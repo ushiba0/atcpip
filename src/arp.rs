@@ -90,7 +90,7 @@ impl Arp {
 
     pub async fn build_arp_request_packet(ip: [u8; 4]) -> Self {
         let mut req = crate::arp::Arp::request_minimal();
-        let my_mac = crate::lock_unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
+        let my_mac = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
 
         req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         req.ethernet_header.source_mac_address = my_mac;
@@ -112,11 +112,11 @@ async fn send_arp_reply(arp_req: Arp) {
 
     // Set ethernet header.
     arp_reply.ethernet_header.destination_mac_address = arp_req.ethernet_header.source_mac_address;
-    arp_reply.ethernet_header.source_mac_address = crate::lock_unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
+    arp_reply.ethernet_header.source_mac_address = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
 
     // Set arp payload.
     arp_reply.opcode = ArpOpCode::Reply as u16;
-    arp_reply.sender_mac_address = crate::lock_unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
+    arp_reply.sender_mac_address = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
     arp_reply.sender_ip_address = crate::interface::MY_IP_ADDRESS;
     arp_reply.target_mac_address = arp_req.sender_mac_address;
     arp_reply.target_ip_address = arp_req.sender_ip_address;
@@ -170,7 +170,7 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
 }
 
 pub async fn resolve_arp(ip: [u8; 4]) -> [u8; 6] {
-    let mut arp_reply_notifier = crate::lock_unwrap_or_yield!(ARP_REPLY_NOTIFIER, resubscribe);
+    let mut arp_reply_notifier = crate::unwrap_or_yield!(ARP_REPLY_NOTIFIER, resubscribe);
     let mut count = 0;
     const LOOP_COUNT_THRESHOULD: usize = 100;
     loop {
