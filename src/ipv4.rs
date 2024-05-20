@@ -1,31 +1,16 @@
+use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 
 use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u8)]
 pub enum Ipv4Protcol {
-    Null = 0xff,
-    #[default]
     Icmp = 0x01,
     // Reply = 0x0,
-}
-
-impl Ipv4Protcol {
-    pub fn from_u8(a: u8) -> Self {
-        match a {
-            0x01 => Self::Icmp,
-            // 0x0002u16 => Self::Reply,
-            _ => {
-                log::warn!("Unimplemented IPv4 protcol : {}", a);
-                Self::Null
-            }
-        }
-    }
-    // pub fn as_u8(self) -> u8 {
-    //     self as u8
-    // }
+    #[default]
+    Invalid = 0xff,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -141,7 +126,7 @@ impl Ipv4Frame {
         self.to_bytes()
     }
 
-    pub fn from_buffer(buf: &Vec<u8>) -> Self {
+    pub fn from_buffer(buf: &[u8]) -> Self {
         Self {
             header: Ipv4Header::from_buffer(&buf[..20]),
             payload: buf[20..].to_vec(),
@@ -168,7 +153,7 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
         // Todo: Checksum と Total length の計算.
         // Todo: 自分宛ての IP Address か確かめる。
 
-        let protcol = Ipv4Protcol::from_u8(ipv4frame.header.protocol);
+        let protcol = Ipv4Protcol::from_u8(ipv4frame.header.protocol).unwrap_or_default();
         match protcol {
             Ipv4Protcol::Icmp => {
                 println!("Received IPv4 ICMP packet: {:?}", ipv4frame);

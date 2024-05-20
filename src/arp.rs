@@ -1,34 +1,23 @@
+use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
-use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
+use tokio::time::{timeout, Duration};
 
 use crate::ethernet::EthernetFrame;
+use crate::OptionExt;
 
 pub static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u16)]
 pub enum ArpOpCode {
-    #[default]
     Request = 0x0001u16,
     Reply = 0x0002u16,
-}
-
-impl ArpOpCode {
-    pub fn from_u16(a: u16) -> Self {
-        match a {
-            0x0001u16 => Self::Request,
-            0x0002u16 => Self::Reply,
-            _ => {
-                unreachable!("{a:?}");
-            }
-        }
-    }
-    pub fn as_u16(self) -> u16 {
-        self as u16
-    }
+    #[default]
+    Invalid = 0xffff,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -76,7 +65,7 @@ impl Arp {
             protcol_type: 0x0800,
             hardware_address_length: 0x06,
             protcol_address_length: 0x04,
-            opcode: ArpOpCode::Request.as_u16(),
+            opcode: ArpOpCode::Request as u16,
             ..Default::default()
         }
     }
@@ -102,11 +91,7 @@ impl Arp {
 
     pub async fn build_arp_request_packet(ip: [u8; 4]) -> Self {
         let mut req = crate::arp::Arp::request_minimal();
-        let my_mac = loop {
-            if crate::interface::MY_MAC_ADDRESS.lock().await.is_some() {
-                break crate::interface::MY_MAC_ADDRESS.lock().await.unwrap();
-            }
-        };
+        let my_mac = crate::interface::get_my_mac_address().await;
 
         req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         req.ethernet_header.source_mac_address = my_mac;
@@ -121,18 +106,18 @@ impl Arp {
 }
 
 pub static ARP_RECEIVER: Lazy<Mutex<Option<Receiver<Arp>>>> = Lazy::new(Default::default);
+pub static ARP_REPLY_NOTIFIER: Lazy<Mutex<Option<Receiver<bool>>>> = Lazy::new(Default::default);
 
 async fn send_arp_reply(arp_req: Arp) {
     let mut arp_reply = Arp::request_minimal();
 
     // Set ethernet header.
     arp_reply.ethernet_header.destination_mac_address = arp_req.ethernet_header.source_mac_address;
-    arp_reply.ethernet_header.source_mac_address =
-        crate::interface::MY_MAC_ADDRESS.lock().await.unwrap();
+    arp_reply.ethernet_header.source_mac_address = crate::interface::get_my_mac_address().await;
 
     // Set arp payload.
-    arp_reply.opcode = ArpOpCode::Reply.as_u16();
-    arp_reply.sender_mac_address = crate::interface::MY_MAC_ADDRESS.lock().await.unwrap();
+    arp_reply.opcode = ArpOpCode::Reply as u16;
+    arp_reply.sender_mac_address = crate::interface::get_my_mac_address().await;
     arp_reply.sender_ip_address = crate::interface::MY_IP_ADDRESS;
     arp_reply.target_mac_address = arp_req.sender_mac_address;
     arp_reply.target_ip_address = arp_req.sender_ip_address;
@@ -145,11 +130,17 @@ async fn send_arp_reply(arp_req: Arp) {
 }
 
 pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
-    *ARP_RECEIVER.lock().await = Some(arp_receive.resubscribe());
+    let arp_receive2 = arp_receive.resubscribe();
+    *ARP_RECEIVER.lock().await = Some(arp_receive2);
+
+    // ARP Reply を通知するためのチャネル.
+    let (arp_reply_sender, arp_reply_receiver) = broadcast::channel::<bool>(2);
+    *ARP_REPLY_NOTIFIER.lock().await = Some(arp_reply_receiver);
+
     loop {
         let arp = arp_receive.recv().await.unwrap();
 
-        let opcode = ArpOpCode::from_u16(arp.opcode);
+        let opcode = ArpOpCode::from_u16(arp.opcode).unwrap_or_default();
         match opcode {
             ArpOpCode::Request => {
                 if arp.target_ip_address == crate::interface::MY_IP_ADDRESS {
@@ -165,24 +156,57 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
                     .lock()
                     .await
                     .insert(arp.sender_ip_address, arp.sender_mac_address);
-                // Todo.
                 // Arp 解決を待っている人に通知する。
+                arp_reply_sender.send(true).unwrap();
+            }
+
+            ArpOpCode::Invalid => {
+                log::warn!(
+                    "Got an unimplemented arp opcode: {}. The packet is ignored.",
+                    arp.opcode
+                );
             }
         }
     }
 }
 
+
+
 pub async fn resolve_arp(ip: [u8; 4]) -> [u8; 6] {
+    let mut arp_reply_notifier = {
+        loop {
+            if let Some(aa) = ARP_REPLY_NOTIFIER.lock().await.as_ref() {
+                break aa.resubscribe();
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+    // let mut arp_reply_notifier = ARP_REPLY_NOTIFIER
+    //     .lock()
+    //     .await
+    //     .as_ref()
+    //     .unwrap_or_yield()
+    //     .await
+    //     .resubscribe();
     loop {
-        if let Some(mac) = ARP_TABLE.lock().await.get(&ip) {
-            return *mac;
+        if let Some(&mac) = ARP_TABLE.lock().await.get(&ip) {
+            return mac;
         } else {
             // Resolve ARP.
             log::trace!("Resolving IP: {ip:x?}");
             let arp_req = Arp::build_arp_request_packet(ip).await;
             let eth_frame = arp_req.to_ethernet_frame();
             eth_frame.send().await.unwrap();
-            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+            // tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+            let res = timeout(Duration::from_millis(10), arp_reply_notifier.recv()).await;
+            match res {
+                Ok(_)=>continue, // got an arp reply. 次の loop で arp table を見に行けば Arp 解決できる。
+                Err(_) => {
+                    tokio::task::yield_now().await;
+                    continue;
+                },
+            }
         }
     }
 }

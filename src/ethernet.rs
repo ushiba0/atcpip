@@ -111,7 +111,7 @@ pub async fn send_ipv4(ipv4_frame: crate::ipv4::Ipv4Frame) -> anyhow::Result<usi
     let destination_ip = ipv4_frame.header.destination_address;
     let eth_header = EthernetHeader {
         destination_mac_address: crate::arp::resolve_arp(destination_ip).await,
-        source_mac_address: crate::interface::MY_MAC_ADDRESS.lock().await.unwrap(),
+        source_mac_address: crate::interface::get_my_mac_address().await,
         ethernet_type: EtherType::Ipv4.as_u16(),
     };
 

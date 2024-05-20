@@ -6,7 +6,7 @@ use tokio::time::{sleep, timeout, Duration};
 async fn wait_arp_reply(mut arp_receiver: Receiver<crate::arp::Arp>) -> anyhow::Result<()> {
     loop {
         let arp = arp_receiver.recv().await?;
-        if arp.opcode == crate::arp::ArpOpCode::Reply.as_u16() {
+        if arp.opcode == crate::arp::ArpOpCode::Reply as u16 {
             println!(
                 "ARP REPLY: {:?} is at {:x?}",
                 arp.sender_ip_address, arp.sender_mac_address

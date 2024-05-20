@@ -1,25 +1,13 @@
+use num_traits::FromPrimitive;
 use tokio::sync::broadcast::Receiver;
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u8)]
 pub enum IcmpType {
     Reply = 0x0,
-    #[default]
     Request = 0x08u8,
+    #[default]
     Unimplemented = 0xff,
-}
-
-impl IcmpType {
-    pub fn from_u8(a: u8) -> Self {
-        match a {
-            0x00 => Self::Reply,
-            0x08 => Self::Request,
-            _ => Self::Unimplemented,
-        }
-    }
-    pub fn as_u8(self) -> u8 {
-        self as u8
-    }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -35,7 +23,7 @@ pub struct Icmp {
 impl Icmp {
     pub fn echo_reqest_minimal() -> Self {
         Self {
-            icmp_type: IcmpType::Request.as_u8(),
+            icmp_type: IcmpType::Request as u8,
             ..Default::default()
         }
     }
@@ -108,7 +96,7 @@ async fn send_icmp_echo_reply(
 ) -> anyhow::Result<()> {
     let mut echo_reply = crate::icmp::Icmp::echo_reqest_minimal();
 
-    echo_reply.icmp_type = IcmpType::Reply.as_u8();
+    echo_reply.icmp_type = IcmpType::Reply as u8;
     echo_reply.identifier = icmp.identifier;
     echo_reply.seqence_number = icmp.seqence_number;
     echo_reply.data = icmp.data;
@@ -118,7 +106,7 @@ async fn send_icmp_echo_reply(
     ipv4_icmp_echo_reply_frame.payload = echo_reply.build_to_bytes();
 
     ipv4_icmp_echo_reply_frame.send().await.unwrap();
-    log::error!("Sent an ICMP Echo Reply: {echo_reply:?}");
+    log::trace!("Sent an ICMP Echo Reply: {echo_reply:?}");
 
     Ok(())
 }
@@ -133,13 +121,13 @@ pub async fn icmp_handler(mut icmp_receive: Receiver<crate::ipv4::Ipv4Frame>) {
 
         // Todo: Checksum と Total length の計算.
 
-        let icmp_type = IcmpType::from_u8(icmp.icmp_type);
+        let icmp_type = IcmpType::from_u8(icmp.icmp_type).unwrap_or_default();
         match icmp_type {
             IcmpType::Reply => {
-                log::warn!("ICMP Reply Received. : {:x?}", icmp);
+                log::trace!("ICMP Reply Received. : {:x?}", icmp);
             }
             IcmpType::Request => {
-                log::warn!("ICMP Echo Reqest.");
+                log::trace!("ICMP Echo Reqest.");
                 send_icmp_echo_reply(ipv4frame.header, icmp).await.unwrap();
             }
             _ => {

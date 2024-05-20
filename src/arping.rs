@@ -6,7 +6,7 @@ use tokio::time::{timeout, Duration};
 async fn wait_arp_reply(mut arp_receiver: Receiver<crate::arp::Arp>) -> anyhow::Result<()> {
     loop {
         let arp = arp_receiver.recv().await?;
-        if arp.opcode == crate::arp::ArpOpCode::Reply.as_u16() {
+        if arp.opcode == crate::arp::ArpOpCode::Reply as u16 {
             println!(
                 "ARP REPLY: {:?} is at {:x?}",
                 arp.sender_ip_address, arp.sender_mac_address
@@ -18,11 +18,7 @@ async fn wait_arp_reply(mut arp_receiver: Receiver<crate::arp::Arp>) -> anyhow::
 
 pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
     let mut req = crate::arp::Arp::request_minimal();
-    let my_mac = loop {
-        if crate::interface::MY_MAC_ADDRESS.lock().await.is_some() {
-            break crate::interface::MY_MAC_ADDRESS.lock().await.unwrap();
-        }
-    };
+    let my_mac = crate::interface::get_my_mac_address().await;
 
     req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
     req.ethernet_header.source_mac_address = my_mac;
