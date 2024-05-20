@@ -39,7 +39,7 @@ impl Ipv4Header {
             version_and_header_length: 0b0100_0101,
             time_to_live: 64,
             protocol: 1, // 1: ICMP.
-            source_address: crate::interface::MY_IP_ADDRESS,
+            source_address: crate::layer2::interface::MY_IP_ADDRESS,
             total_length: 37,
             ..Default::default()
         }

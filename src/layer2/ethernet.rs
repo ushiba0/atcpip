@@ -101,7 +101,7 @@ impl EthernetFrame {
 }
 
 pub async fn send_ethernet_frame(ethernet_frame: EthernetFrame) -> anyhow::Result<usize> {
-    crate::interface::send_to_pnet(ethernet_frame).await
+    crate::layer2::interface::send_to_pnet(ethernet_frame).await
 }
 
 // 設計思想:
@@ -111,7 +111,10 @@ pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> anyhow::Re
     let destination_ip = ipv4_frame.header.destination_address;
     let eth_header = EthernetHeader {
         destination_mac_address: crate::layer2::arp::resolve_arp(destination_ip).await,
-        source_mac_address: crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone),
+        source_mac_address: crate::unwrap_or_yield!(
+            crate::layer2::interface::MY_MAC_ADDRESS,
+            clone
+        ),
         ethernet_type: EtherType::Ipv4.as_u16(),
     };
 

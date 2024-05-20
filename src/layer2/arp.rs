@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
 use crate::layer2::ethernet::{EtherType, EthernetFrame, EthernetHeader};
+use crate::layer2::interface::{MY_IP_ADDRESS, MY_MAC_ADDRESS};
 
 static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
 
@@ -89,13 +90,13 @@ impl Arp {
 
     pub async fn build_arp_request_packet(ip: [u8; 4]) -> Self {
         let mut req = Arp::request_minimal();
-        let my_mac = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
+        let my_mac = crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone);
 
         req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         req.ethernet_header.source_mac_address = my_mac;
 
         req.sender_mac_address = my_mac;
-        req.sender_ip_address = crate::interface::MY_IP_ADDRESS;
+        req.sender_ip_address = MY_IP_ADDRESS;
         req.target_mac_address = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         req.target_ip_address = ip;
 
@@ -111,13 +112,12 @@ async fn send_arp_reply(arp_req: Arp) {
 
     // Set ethernet header.
     arp_reply.ethernet_header.destination_mac_address = arp_req.ethernet_header.source_mac_address;
-    arp_reply.ethernet_header.source_mac_address =
-        crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
+    arp_reply.ethernet_header.source_mac_address = crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone);
 
     // Set arp payload.
     arp_reply.opcode = ArpOpCode::Reply as u16;
-    arp_reply.sender_mac_address = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
-    arp_reply.sender_ip_address = crate::interface::MY_IP_ADDRESS;
+    arp_reply.sender_mac_address = crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone);
+    arp_reply.sender_ip_address = MY_IP_ADDRESS;
     arp_reply.target_mac_address = arp_req.sender_mac_address;
     arp_reply.target_ip_address = arp_req.sender_ip_address;
 
@@ -142,7 +142,7 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
         let opcode = ArpOpCode::from_u16(arp.opcode).unwrap_or_default();
         match opcode {
             ArpOpCode::Request => {
-                if arp.target_ip_address == crate::interface::MY_IP_ADDRESS {
+                if arp.target_ip_address == MY_IP_ADDRESS {
                     // Send an arp reply.
                     log::trace!("Get arp request");
                     send_arp_reply(arp).await;

@@ -3,7 +3,6 @@ use clap::{Parser, Subcommand};
 use std::net::Ipv4Addr;
 
 mod arping;
-mod interface;
 mod pingcmd;
 
 mod layer2;
@@ -61,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let cli_cmds = CommandArguments::parse();
     set_loglevel(&cli_cmds);
 
-    crate::interface::spawn_tx_handler().await;
+    crate::layer2::interface::spawn_tx_handler().await;
 
     let handle = match cli_cmds.second_command {
         SecondCommand::Arping(opts) => {

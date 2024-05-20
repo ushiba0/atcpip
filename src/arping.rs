@@ -3,6 +3,8 @@ use std::net::Ipv4Addr;
 use tokio::sync::broadcast::Receiver;
 use tokio::time::{timeout, Duration};
 
+use crate::layer2::interface::{MY_IP_ADDRESS, MY_MAC_ADDRESS};
+
 async fn wait_arp_reply(mut arp_receiver: Receiver<crate::layer2::arp::Arp>) -> anyhow::Result<()> {
     loop {
         let arp = arp_receiver.recv().await?;
@@ -17,13 +19,13 @@ async fn wait_arp_reply(mut arp_receiver: Receiver<crate::layer2::arp::Arp>) -> 
 
 pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
     let mut req = crate::layer2::arp::Arp::request_minimal();
-    let my_mac = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
+    let my_mac = crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone);
 
     req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
     req.ethernet_header.source_mac_address = my_mac;
 
     req.sender_mac_address = my_mac;
-    req.sender_ip_address = crate::interface::MY_IP_ADDRESS;
+    req.sender_ip_address = MY_IP_ADDRESS;
     req.target_mac_address = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
     req.target_ip_address = ip.octets();
 
