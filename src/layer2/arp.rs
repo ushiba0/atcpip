@@ -88,7 +88,7 @@ impl Arp {
     }
 
     pub async fn build_arp_request_packet(ip: [u8; 4]) -> Self {
-        let mut req = crate::arp::Arp::request_minimal();
+        let mut req = Arp::request_minimal();
         let my_mac = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
 
         req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
@@ -150,7 +150,7 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
 
             ArpOpCode::Reply => {
                 log::trace!("ARP Reply: {arp:x?}");
-                crate::arp::ARP_TABLE
+                ARP_TABLE
                     .lock()
                     .await
                     .insert(arp.sender_ip_address, arp.sender_mac_address);
