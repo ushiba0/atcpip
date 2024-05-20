@@ -6,9 +6,9 @@ use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
-use crate::layer2::ethernet::{EthernetFrame, EthernetHeader, EtherType};
+use crate::layer2::ethernet::{EtherType, EthernetFrame, EthernetHeader};
 
- static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
+static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u16)]
@@ -111,7 +111,8 @@ async fn send_arp_reply(arp_req: Arp) {
 
     // Set ethernet header.
     arp_reply.ethernet_header.destination_mac_address = arp_req.ethernet_header.source_mac_address;
-    arp_reply.ethernet_header.source_mac_address = crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
+    arp_reply.ethernet_header.source_mac_address =
+        crate::unwrap_or_yield!(crate::interface::MY_MAC_ADDRESS, clone);
 
     // Set arp payload.
     arp_reply.opcode = ArpOpCode::Reply as u16;
@@ -174,7 +175,7 @@ pub async fn resolve_arp(ip: [u8; 4]) -> [u8; 6] {
     const LOOP_COUNT_THRESHOULD: usize = 100;
     loop {
         if let Some(&mac) = ARP_TABLE.lock().await.get(&ip) {
-            log::trace!("IP: {ip:x?} was resolved to MAC: {mac:x?}" );
+            log::trace!("IP: {ip:x?} was resolved to MAC: {mac:x?}");
             return mac;
         } else {
             // Resolve ARP.

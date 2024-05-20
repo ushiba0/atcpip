@@ -38,7 +38,7 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
     });
-    
+
     let arp_receiver = crate::unwrap_or_yield!(crate::layer2::arp::ARP_RECEIVER, resubscribe);
     let f = timeout(Duration::from_millis(10000), wait_arp_reply(arp_receiver)).await;
 

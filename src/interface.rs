@@ -5,7 +5,7 @@ use pnet::datalink::{Config, DataLinkReceiver, DataLinkSender};
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 
-use crate::layer2::ethernet::{EthernetFrame,EtherType};
+use crate::layer2::ethernet::{EtherType, EthernetFrame};
 use crate::layer3::ipv4::Ipv4Frame;
 
 pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
@@ -66,7 +66,7 @@ pub async fn spawn_tx_handler() {
 
         // ARP ハンドラスレッドを spawn し、 ARP ハンドラスレッドに通知する用の Sender を返す。
         let arp_rx_sender = {
-            use crate::layer2::arp::{Arp, arp_handler};
+            use crate::layer2::arp::{arp_handler, Arp};
             // ARP packet が来たら、この channel で上のレイヤに通知する。
             let (arp_rx_sender, arp_rx_receiver) = broadcast::channel::<Arp>(2);
 
@@ -80,8 +80,7 @@ pub async fn spawn_tx_handler() {
         // IPv4 ハンドラスレッドを spawn し、 IPv4 ハンドラスレッドに通知する用の Sender を返す。
         let ipv4_rx_sender = {
             // Ipv4 の受信を上のレイヤに伝えるチャネル.
-            let (ipv4_rx_sender, ipv4_rx_receiver) =
-                broadcast::channel::<Ipv4Frame>(2);
+            let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<Ipv4Frame>(2);
 
             // Spawn IPv4 handler.
             tokio::spawn(async move {

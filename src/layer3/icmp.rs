@@ -1,7 +1,7 @@
 use num_traits::FromPrimitive;
 use tokio::sync::broadcast::Receiver;
 
-use crate::layer3::ipv4::{Ipv4Header,Ipv4Frame};
+use crate::layer3::ipv4::{Ipv4Frame, Ipv4Header};
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u8)]
@@ -44,7 +44,7 @@ impl Icmp {
 
     fn get_checksum(&self) -> u16 {
         let bytes = self.to_bytes();
-        crate::icmp::calc_checksum(&bytes)
+        calc_checksum(&bytes)
     }
 
     // Calculate checksum, and convert to bytes.
@@ -92,11 +92,8 @@ pub fn calc_checksum(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-async fn send_icmp_echo_reply(
-    ipv4header: Ipv4Header,
-    icmp: Icmp,
-) -> anyhow::Result<()> {
-    let mut echo_reply = crate::icmp::Icmp::echo_reqest_minimal();
+async fn send_icmp_echo_reply(ipv4header: Ipv4Header, icmp: Icmp) -> anyhow::Result<()> {
+    let mut echo_reply = Icmp::echo_reqest_minimal();
 
     echo_reply.icmp_type = IcmpType::Reply as u8;
     echo_reply.identifier = icmp.identifier;
@@ -119,7 +116,7 @@ pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Frame>) {
 
     loop {
         let ipv4frame = icmp_receive.recv().await.unwrap();
-        let icmp = crate::icmp::Icmp::from_buffer(&ipv4frame.payload);
+        let icmp = Icmp::from_buffer(&ipv4frame.payload);
 
         // Todo: Checksum と Total length の計算.
 

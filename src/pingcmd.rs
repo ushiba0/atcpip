@@ -3,7 +3,7 @@ use std::net::Ipv4Addr;
 use tokio::time::{sleep, Duration};
 
 pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
-    let mut echo_reqest = crate::icmp::Icmp::echo_reqest_minimal();
+    let mut echo_reqest = crate::layer3::icmp::Icmp::echo_reqest_minimal();
 
     echo_reqest.identifier = 0;
     echo_reqest.seqence_number = 0;
@@ -23,7 +23,7 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
             sleep(Duration::from_millis(1000)).await;
         }
     });
-    
+
     sleep(Duration::from_millis(10 * 1000)).await;
     Ok(())
 }

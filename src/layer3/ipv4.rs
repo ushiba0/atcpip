@@ -81,7 +81,7 @@ impl Ipv4Header {
     // 呼び出しているのでパフォーマンスを気にする場合はメモ化しておく。
     fn get_checksum(&self) -> u16 {
         let bytes = self.to_bytes();
-        crate::icmp::calc_checksum(&bytes)
+        super::icmp::calc_checksum(&bytes)
     }
 
     // Calculate IP header checksum and convert to bytes.
@@ -134,7 +134,7 @@ impl Ipv4Frame {
     }
 }
 
- static IPV4_RECEIVER: Lazy<Mutex<Option<Receiver<Ipv4Frame>>>> = Lazy::new(Default::default);
+static IPV4_RECEIVER: Lazy<Mutex<Option<Receiver<Ipv4Frame>>>> = Lazy::new(Default::default);
 
 pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
     *IPV4_RECEIVER.lock().await = Some(ipv4_receive.resubscribe());
@@ -144,7 +144,7 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
 
     // Spawn ICMP handler.
     tokio::spawn(async move {
-        crate::icmp::icmp_handler(icmp_rx_receiver).await;
+        super::icmp::icmp_handler(icmp_rx_receiver).await;
     });
 
     loop {

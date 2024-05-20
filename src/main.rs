@@ -3,8 +3,6 @@ use clap::{Parser, Subcommand};
 use std::net::Ipv4Addr;
 
 mod arping;
-// mod ethernet;
-mod icmp;
 mod interface;
 mod pingcmd;
 
@@ -108,7 +106,6 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-
 #[macro_export]
 macro_rules! unwrap_or_yield {
     ($global_var:expr, $method:ident) => {
@@ -116,7 +113,7 @@ macro_rules! unwrap_or_yield {
             let a = $global_var.lock().await;
             match a.as_ref() {
                 Some(value) => break value.$method(),
-                None => tokio::task::yield_now().await
+                None => tokio::task::yield_now().await,
             }
         }
     };
