@@ -1,3 +1,4 @@
+use bitfield::Bit;
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 
@@ -51,6 +52,9 @@ impl Ipv4Header {
             differenciate_service_field: buf[1],
             total_length: u16::from_be_bytes([buf[2], buf[3]]),
             identification: u16::from_be_bytes([buf[4], buf[5]]),
+            // 上位 1 bit: reserved
+            //      2 bit: DF 0 = May Fragment, 1 = Don't Fragment.
+            //      3 bit: MF 0 = Last Fragment, 1 = More Fragments.
             flags: u16::from_be_bytes([buf[6], buf[7]]),
             time_to_live: buf[8],
             protocol: buf[9],
@@ -91,6 +95,14 @@ impl Ipv4Header {
         bytes[10] = checksum[0];
         bytes[11] = checksum[1];
         bytes
+    }
+
+    fn get_fragment_df_bit(&self) -> bool {
+        self.flags.bit(14)
+    }
+
+    fn get_fragment_mf_bit(&self) -> bool {
+        self.flags.bit(13)
     }
 }
 
@@ -153,11 +165,18 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
         // Todo: Checksum と Total length の計算.
         // Todo: 自分宛ての IP Address か確かめる。
 
+        if ipv4frame.header.get_fragment_df_bit() {
+            // 即上のレイヤに渡す。
+        }
+
+        if ipv4frame.header.get_fragment_mf_bit() {
+            // 1 ならキューに貯める。
+            // 0 なら一旦 identifier をチェックする必要がある。
+        }
+
         let protcol = Ipv4Protcol::from_u8(ipv4frame.header.protocol).unwrap_or_default();
         match protcol {
             Ipv4Protcol::Icmp => {
-                println!("Received IPv4 ICMP packet: {:?}", ipv4frame);
-                // let icmp = crate::icmp::Icmp::from_buffer(&ipv4frame.payload);
                 icmp_rx_sender.send(ipv4frame).unwrap();
             }
 

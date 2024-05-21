@@ -104,6 +104,7 @@ pub async fn spawn_tx_handler() {
                     }
                     EtherType::Ipv4 => {
                         let ipv4frame = Ipv4Frame::from_buffer(&eth_frame.payload);
+                        // Send to ipv4_handler() at crate::layer3::ipv4.
                         ipv4_rx_sender.send(ipv4frame).unwrap();
                     }
                     _ => {}
