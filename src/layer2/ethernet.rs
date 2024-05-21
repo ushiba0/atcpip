@@ -1,6 +1,7 @@
 const ETHERNET_FRAME_SIZE: usize = 1500;
 
 use crate::layer2::arp::Arp;
+use crate::layer2::interface::{DEFAULT_GATEWAY, MY_IP_ADDRESS, MY_MAC_ADDRESS, SUBNET_MASK};
 
 #[derive(Debug, Default, PartialEq, Clone, Copy)]
 #[repr(u16)]
@@ -104,23 +105,38 @@ pub async fn send_ethernet_frame(ethernet_frame: EthernetFrame) -> anyhow::Resul
     crate::layer2::interface::send_to_pnet(ethernet_frame).await
 }
 
+fn is_same_subnet(dest_ip: [u8; 4]) -> bool {
+    let subnet_mask = u32::from_be_bytes(SUBNET_MASK);
+    let my_nw_u32 = u32::from_be_bytes(MY_IP_ADDRESS) & subnet_mask;
+    let dest_nw_u32 = u32::from_be_bytes(dest_ip) & subnet_mask;
+    my_nw_u32 == dest_nw_u32
+}
+// Default gateway に振るか、同一サブネット化を判断する
+
+async fn generate_ethernet_header(dest_ip: [u8; 4]) -> EthernetHeader {
+    let destination_mac_address = if is_same_subnet(dest_ip) {
+        // dest_ip を ARP 解決して MAC を返す。
+        crate::layer2::arp::resolve_arp(dest_ip).await
+    } else {
+        // Default gateway をARP 解決する。
+        crate::layer2::arp::resolve_arp(DEFAULT_GATEWAY).await
+    };
+    EthernetHeader {
+        destination_mac_address,
+        source_mac_address: crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone),
+        ethernet_type: EtherType::Ipv4.as_u16(),
+    }
+}
+
 // 設計思想:
 // 1 つ上にどんなレイヤがあるかは知っておく必要がある。
 // 下にどんなレイヤがあるかは全く知る必要がない。
 pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> anyhow::Result<usize> {
     let destination_ip = ipv4_frame.header.destination_address;
-    let eth_header = EthernetHeader {
-        destination_mac_address: crate::layer2::arp::resolve_arp(destination_ip).await,
-        source_mac_address: crate::unwrap_or_yield!(
-            crate::layer2::interface::MY_MAC_ADDRESS,
-            clone
-        ),
-        ethernet_type: EtherType::Ipv4.as_u16(),
-    };
+    let eth_header = generate_ethernet_header(destination_ip).await;
 
     let ether_frame = EthernetFrame {
         header: eth_header,
-        // payload: ipv4_frame.to_bytes(),
         payload: ipv4_frame.clone().build_to_bytes(),
     };
 

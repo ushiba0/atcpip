@@ -10,8 +10,10 @@ use crate::layer3::ipv4::Ipv4Frame;
 
 pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
+pub const DEFAULT_GATEWAY: [u8; 4] = [192, 168, 1, 1];
+pub const SUBNET_MASK: [u8; 4] = [255, 255, 255, 0];
 const PNET_TX_TIMEOUT_MICROSEC: u64 = 1000 * 10; // 10 ms.
-const PNET_RX_TIMEOUT_MICROSEC: u64 = 1000 * 100; // 100 ms.
+const PNET_RX_TIMEOUT_MICROSEC: u64 = 1000; // 1 ms
 static SEND_HANDLE: Lazy<Mutex<Option<tokio::sync::broadcast::Sender<EthernetFrame>>>> =
     Lazy::new(|| Mutex::new(None));
 

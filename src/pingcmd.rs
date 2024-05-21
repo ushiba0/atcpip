@@ -69,6 +69,8 @@ pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
 
 // 指定した identifier, seqence_number の ICMP Echo Reply をタイムアウト付きで待ち受ける。
 // 受診した場合は標準出力に結果を流す。
+// PNET_RX_TIMEOUT_MICROSEC が 100 ms だと、指定したタイムアウト時刻より大幅に長く、
+// タイムアウトに 100ms かかることがある。
 async fn icmp_echo_reply_listener_with_timeout(
     ip: [u8; 4],
     identifier: u16,
@@ -76,12 +78,11 @@ async fn icmp_echo_reply_listener_with_timeout(
     timestamp_icmp_sent: std::time::Instant,
     timeout_ms: u64,
 ) {
-    log::trace!("Listening ICMP Echo Reply with id:{identifier}, seq:{seqence_number}");
+    log::trace!("Listening ICMP Echo Reply with id:{identifier}, seq:{seqence_number}, timeout:{timeout_ms}");
     let res = timeout(Duration::from_millis(timeout_ms), async {
         let mut icmp_notifier_receiver = crate::unwrap_or_yield!(ICMP_REPLY_NOTIFIER, resubscribe);
         loop {
-            let ipv4frame: crate::layer3::ipv4::Ipv4Frame =
-                icmp_notifier_receiver.recv().await.unwrap();
+            let ipv4frame = icmp_notifier_receiver.recv().await.unwrap();
             let icmp = Icmp::from_buffer(&ipv4frame.payload);
             if icmp.icmp_type == IcmpType::Reply as u8
                 && ipv4frame.header.source_address == ip
@@ -91,12 +92,17 @@ async fn icmp_echo_reply_listener_with_timeout(
                 let elapsed_ms= timestamp_icmp_sent.elapsed().as_micros() as f64 / 1000.0;
                 println!("Echo reply from {ip:?}, id: {identifier}  seq: {seqence_number}  time: {elapsed_ms:.3} ms");
                 break;
+            }else{
+                log::error!("怪しいパケット受信");
             }
         }
     })
     .await;
     match res {
         Ok(a) => log::trace!("ICMP Echo OK! {:?}", a),
-        Err(e) => log::warn!("ICMP Echo timeout! {:?}", e),
+        Err(e) => {
+            log::warn!("ICMP Echo timeout! {:?}", e);
+            println!("Timeout!");
+        },
     }
 }
