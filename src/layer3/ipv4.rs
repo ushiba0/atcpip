@@ -1,4 +1,4 @@
-use bitfield::Bit;
+use bitfield::{Bit, BitMut};
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 
@@ -44,6 +44,8 @@ impl Ipv4Header {
             total_length: 37,
             ..Default::default()
         }
+        .set_fragment_df_bit(true)
+        .set_fragment_mf_bit(false)
     }
 
     pub fn from_buffer(buf: &[u8]) -> Self {
@@ -101,8 +103,18 @@ impl Ipv4Header {
         self.flags.bit(14)
     }
 
+    fn set_fragment_df_bit(mut self, val: bool) -> Self {
+        self.flags.set_bit(14, val);
+        self
+    }
+
     fn get_fragment_mf_bit(&self) -> bool {
         self.flags.bit(13)
+    }
+
+    fn set_fragment_mf_bit(mut self, val: bool) -> Self {
+        self.flags.set_bit(13, val);
+        self
     }
 }
 
