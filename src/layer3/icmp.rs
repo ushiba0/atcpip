@@ -20,16 +20,40 @@ pub struct Icmp {
     pub code: u8,
     _checksum: u16, // Should always be zero. Checksum can be calc with self.get_checksum().
     pub identifier: u16,
-    pub seqence_number: u16,
+    pub sequence_number: u16,
     pub data: Vec<u8>, // Timestamp (8 bytes) + Data (40 bytes).
 }
 
 impl Icmp {
+    pub fn minimal() -> Self {
+        Default::default()
+    }
     pub fn echo_reqest_minimal() -> Self {
-        Self {
-            icmp_type: IcmpType::Request as u8,
-            ..Default::default()
-        }
+        Self::minimal().set_icmp_type(IcmpType::Request)
+    }
+
+    pub fn echo_reply_minimal() -> Self {
+        Self::minimal().set_icmp_type(IcmpType::Reply)
+    }
+
+    pub fn set_icmp_type(mut self, icmp_type: IcmpType) -> Self {
+        self.icmp_type = icmp_type as u8;
+        self
+    }
+
+    pub fn set_identifier(mut self, identifier: u16) -> Self {
+        self.identifier = identifier;
+        self
+    }
+
+    pub fn set_sequence_number(mut self, sequence_number: u16) -> Self {
+        self.sequence_number = sequence_number;
+        self
+    }
+
+    pub fn set_payload(mut self, data: &[u8]) -> Self {
+        self.data = data.to_vec();
+        self
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -39,7 +63,7 @@ impl Icmp {
         assert_eq!(self._checksum, 0);
         bytes.extend_from_slice(&self._checksum.to_be_bytes());
         bytes.extend_from_slice(&self.identifier.to_be_bytes());
-        bytes.extend_from_slice(&self.seqence_number.to_be_bytes());
+        bytes.extend_from_slice(&self.sequence_number.to_be_bytes());
         bytes.extend_from_slice(&self.data);
         bytes
     }
@@ -64,16 +88,23 @@ impl Icmp {
             code: buf[1],
             _checksum: u16::from_be_bytes([buf[2], buf[3]]),
             identifier: u16::from_be_bytes([buf[4], buf[5]]),
-            seqence_number: u16::from_be_bytes([buf[6], buf[7]]),
+            sequence_number: u16::from_be_bytes([buf[6], buf[7]]),
             data: buf[8..].to_vec(),
         }
     }
 
-    pub fn to_ipv4_frame(&self, ip: [u8; 4]) -> Ipv4Frame {
-        let mut ipv4_frame = Ipv4Frame::minimal();
-        ipv4_frame.header.destination_address = ip;
-        ipv4_frame.payload = self.build_to_bytes();
-        ipv4_frame
+    // pub fn to_ipv4_frame(&self, ip: [u8; 4]) -> Ipv4Frame {
+    //     let mut ipv4_frame = Ipv4Frame::minimal();
+    //     ipv4_frame.header.destination_address = ip;
+    //     ipv4_frame.payload = self.build_to_bytes();
+    //     ipv4_frame
+    // }
+
+    pub fn to_ipv4(&self, ip: [u8; 4]) -> anyhow::Result<super::ipv4::Ipv4FrameUnchecked> {
+        super::ipv4::Ipv4FrameUnchecked::new()
+            .set_ipav4addr(ip)
+            .set_protcol(super::ipv4::Ipv4Protcol::Icmp)
+            .set_payload(&self.build_to_bytes())
     }
 }
 
@@ -102,20 +133,18 @@ pub fn calc_checksum(data: &[u8]) -> u16 {
 }
 
 async fn send_icmp_echo_reply(ipv4header: Ipv4Header, icmp: Icmp) -> anyhow::Result<()> {
-    let mut echo_reply = Icmp::echo_reqest_minimal();
+    let echo_reply = Icmp::echo_reply_minimal()
+        .set_identifier(icmp.identifier)
+        .set_sequence_number(icmp.sequence_number)
+        .set_payload(&icmp.data);
 
-    echo_reply.icmp_type = IcmpType::Reply as u8;
-    echo_reply.identifier = icmp.identifier;
-    echo_reply.seqence_number = icmp.seqence_number;
-    echo_reply.data = icmp.data;
+    echo_reply
+        .to_ipv4(ipv4header.source_address)?
+        .build()
+        .send()
+        .await?;
 
-    let mut ipv4_icmp_echo_reply_frame = Ipv4Frame::minimal();
-    ipv4_icmp_echo_reply_frame.header.destination_address = ipv4header.source_address;
-    ipv4_icmp_echo_reply_frame.payload = echo_reply.build_to_bytes();
-
-    ipv4_icmp_echo_reply_frame.send().await.unwrap();
     log::trace!("Sent an ICMP Echo Reply: {echo_reply:?}");
-
     Ok(())
 }
 
@@ -151,4 +180,13 @@ pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Frame>) {
             }
         }
     }
+}
+
+#[test]
+fn test_icmp_checksum() {
+    let echo_reqest = Icmp::echo_reqest_minimal()
+        .set_identifier(0x7f16)
+        .set_sequence_number(60)
+        .set_payload(&vec![0xda; 100]);
+    assert_eq!(echo_reqest.get_checksum(), 0xb9ee);
 }

@@ -14,7 +14,7 @@ pub enum Ipv4Protcol {
     Invalid = 0xff,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct Ipv4Header {
     pub version_and_header_length: u8, // Default: 0b0100_0101
     pub differenciate_service_field: u8,
@@ -28,6 +28,8 @@ pub struct Ipv4Header {
     pub destination_address: [u8; 4],
 }
 
+// サイズが MTU に収まっている。
+// length, identification, checksum なども計算済みである。
 #[derive(Default, Debug, Clone)]
 pub struct Ipv4Frame {
     pub header: Ipv4Header,
@@ -35,7 +37,7 @@ pub struct Ipv4Frame {
 }
 
 impl Ipv4Header {
-    pub fn minimal() -> Self {
+    fn minimal() -> Self {
         Self {
             version_and_header_length: 0b0100_0101,
             time_to_live: 64,
@@ -48,7 +50,7 @@ impl Ipv4Header {
         .set_fragment_mf_bit(false)
     }
 
-    pub fn from_buffer(buf: &[u8]) -> Self {
+    fn from_buffer(buf: &[u8]) -> Self {
         Self {
             version_and_header_length: buf[0],
             differenciate_service_field: buf[1],
@@ -119,14 +121,14 @@ impl Ipv4Header {
 }
 
 impl Ipv4Frame {
-    pub fn minimal() -> Self {
-        Self {
-            header: Ipv4Header::minimal(),
-            payload: Vec::new(),
-        }
-    }
+    // pub fn minimal() -> Self {
+    //     Self {
+    //         header: Ipv4Header::minimal(),
+    //         payload: Vec::new(),
+    //     }
+    // }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(&self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.extend_from_slice(&self.header.build_to_bytes());
         bytes.extend_from_slice(&self.payload);
@@ -195,6 +197,55 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
             _ => {
                 log::warn!("Uninplemented.");
             }
+        }
+    }
+}
+
+/* ======== */
+
+#[derive(Default, Debug, Clone)]
+pub struct Ipv4FrameUnchecked {
+    destination_address: [u8; 4],
+    protcol: Ipv4Protcol,
+    payload: Vec<u8>,
+}
+
+// 外部のサービスが IPv4 を触るときは必ずこの構造体経由で操作するようにしたい。
+impl Ipv4FrameUnchecked {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn set_ipav4addr(mut self, ipv4addr: [u8; 4]) -> Self {
+        self.destination_address = ipv4addr;
+        self
+    }
+
+    pub fn set_payload(mut self, payload: &[u8]) -> anyhow::Result<Self> {
+        let payload = payload.to_vec();
+        anyhow::ensure!(payload.len() < 65536, "IPv4 payload size exceeds maximum.");
+        self.payload = payload.to_vec();
+        Ok(self)
+    }
+
+    pub fn set_protcol(mut self, protcol: Ipv4Protcol) -> Self {
+        self.protcol = protcol;
+        self
+    }
+
+    pub fn build(&self) -> Ipv4Frame {
+        if self.payload.len() <= crate::layer2::interface::MTU {
+            // フラグメントしなくていいのでそのまま送る。
+            let mut header = Ipv4Header::minimal();
+            header.destination_address = self.destination_address;
+            header.protocol = self.protcol as u8;
+            Ipv4Frame {
+                header,
+                payload: self.payload.clone(),
+            }
+        } else {
+            // フラグメントしてから送る。
+            unimplemented!()
         }
     }
 }

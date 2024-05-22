@@ -175,14 +175,14 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
     }
 }
 
-pub async fn resolve_arp(ip: [u8; 4]) -> [u8; 6] {
+pub async fn resolve_arp(ip: [u8; 4]) -> anyhow::Result<[u8; 6]> {
     let mut arp_reply_notifier = crate::unwrap_or_yield!(ARP_REPLY_NOTIFIER, resubscribe);
-    let mut count = 0;
     const LOOP_COUNT_THRESHOULD: usize = 100;
-    loop {
+
+    for count in 0..LOOP_COUNT_THRESHOULD {
         if let Some(&mac) = ARP_TABLE.lock().await.get(&ip) {
-            log::trace!("IP: {ip:x?} was resolved to MAC: {mac:x?}");
-            return mac;
+            log::trace!("IP: {ip:x?} was resolved to MAC: {mac:x?} in {count} times loop.");
+            return Ok(mac);
         } else {
             // Resolve ARP.
             log::trace!("Sending ARP reqest for {ip:x?}");
@@ -190,21 +190,18 @@ pub async fn resolve_arp(ip: [u8; 4]) -> [u8; 6] {
             let eth_frame = arp_req.to_ethernet_frame();
             eth_frame.send().await.unwrap();
 
-            // timeout の戻り値は Result<Result<bool, RecvError>, Elapsed>.
-            // Ok の場合は arp reply (とは限らないが何かしらの arp) が帰ってきているので、次の loop で値を取り出す。
+            // Ok の場合は arp (とは限らないが何かしらの arp) が帰ってきているので、次の loop で値を取り出す。
             // Err の場合は timeout したということだが、その場合は CPU を別スレッドに一度明け渡す。
-            let res = timeout(Duration::from_millis(5), arp_reply_notifier.recv()).await;
-            match res {
+            match timeout(Duration::from_millis(5), arp_reply_notifier.recv()).await {
                 Ok(_) => {}
                 Err(_) => tokio::task::yield_now().await,
             }
         }
-        count += 1;
-        if count >= LOOP_COUNT_THRESHOULD {
-            log::warn!(
-                "[resolve_arp] Exceeded loop count threshould during ARP resolving {:x?}",
-                ip
-            );
-        }
     }
+    let error_msg = format!(
+        "[resolve_arp] Exceeded loop count threshould during ARP resolving IP {:?}",
+        ip
+    );
+    log::warn!("{error_msg}");
+    Err(anyhow::anyhow!(error_msg))
 }
