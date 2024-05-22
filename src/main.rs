@@ -13,6 +13,10 @@ struct CommandArguments {
     #[clap(subcommand)]
     second_command: SecondCommand,
 
+    /// Print info level log.
+    #[clap(short, long)]
+    info: bool,
+
     /// Print verbose log.
     #[clap(short, long)]
     verbose: bool,
@@ -39,10 +43,21 @@ enum SecondCommand {
 struct PingCLIOpts {
     /// IPv4 Address.
     ipv4_address: String,
+
+    /// Stop after <count> replies.
+    #[clap(short, long, default_value = "0")]
+    count: usize,
+
+    /// Echo reply timeout in ms.
+    #[clap(long, default_value = "1000")]
+    timeout_ms: u64,
 }
 
 fn set_loglevel(cli_cmds: &CommandArguments) {
     std::env::set_var("RUST_LOG", "NONE");
+    if cli_cmds.info {
+        std::env::set_var("RUST_LOG", "info");
+    }
     if cli_cmds.verbose {
         std::env::set_var("RUST_LOG", "debug");
     }
@@ -74,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
         SecondCommand::Ping(opts) => {
             let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
             log::info!("Destination IP Address: {ip:?}");
-            tokio::spawn(async move { crate::pingcmd::main(ip).await })
+            tokio::spawn(async move { crate::pingcmd::main(ip, opts.count, opts.timeout_ms).await })
         }
         SecondCommand::Server => {
             use tokio::time::{sleep, Duration};

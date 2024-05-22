@@ -5,53 +5,48 @@ use tokio::time::{sleep, timeout, Duration};
 
 use crate::layer3::icmp::{Icmp, IcmpType, ICMP_REPLY_NOTIFIER};
 
-const ICMP_ECHO_REPLY_TIMEOUT_MS: u64 = 1000;
-
-pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
+pub async fn main(ipv4addr: Ipv4Addr, count: usize, timeout_ms: u64) -> anyhow::Result<()> {
+    // stop_count == 0: Loop forever.
+    // stop_count > 0: Stops after <stop_count> reply.
+    let stop_count = if count == 0 { usize::MAX } else { count };
+    let ip = ipv4addr.octets();
     let mut echo_reqest = Icmp::echo_reqest_minimal();
-
-    let random_identifier = rand::thread_rng().gen();
-    echo_reqest.identifier = random_identifier;
-    echo_reqest.seqence_number = 0;
     echo_reqest.data = vec![0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x70];
 
     let mut ipv4_icmp_echo_req_frame = crate::layer3::ipv4::Ipv4Frame::minimal();
-    ipv4_icmp_echo_req_frame.header.destination_address = ip.octets();
+    ipv4_icmp_echo_req_frame.header.destination_address = ip;
     ipv4_icmp_echo_req_frame.payload = echo_reqest.build_to_bytes();
 
     log::debug!("ICMP Echo Request packet: {:x?}", ipv4_icmp_echo_req_frame);
 
     // Send ICMP Echo request packet every 1 sec.
-    tokio::spawn(async move {
-        let mut seq_origin = 1u16;
-        loop {
-            let seq_num = seq_origin;
-            seq_origin = seq_origin.wrapping_add(1);
-            let mut echo_req = echo_reqest.clone();
-            echo_req.seqence_number = seq_num;
+    let handle = tokio::spawn(async move {
+        let mut seq_num = 0u16;
+        let mut id_num = rand::thread_rng().gen::<u16>();
 
-            let time_ping_send = std::time::Instant::now();
+        for _ in 0..stop_count {
+            seq_num = seq_num.wrapping_add(1);
+            id_num = id_num.wrapping_add(1);
+            echo_reqest.seqence_number = seq_num;
+            echo_reqest.identifier = id_num;
+            let ipv4_frame = echo_reqest.to_ipv4_frame(ip);
+
             // Spawn ICMP Echo Reply listener.
             tokio::spawn(icmp_echo_reply_listener_with_timeout(
-                ip.octets(),
-                random_identifier,
+                ip,
+                id_num,
                 seq_num,
-                time_ping_send,
-                ICMP_ECHO_REPLY_TIMEOUT_MS,
+                std::time::Instant::now(),
+                timeout_ms,
             ));
 
-            // log::trace!("Send icmp echo request: {:x?}", ipv4_icmp_echo_req_frame);
-            // ipv4_icmp_echo_req_frame.send().await.unwrap();
-            log::trace!(
-                "Send icmp echo request: {:x?}",
-                echo_req.to_ipv4_frame(ip.octets())
-            );
-            echo_req.to_ipv4_frame(ip.octets()).send().await.unwrap();
+            log::trace!("Sending icmp echo request: {ipv4_frame:x?}");
+            ipv4_frame.send().await.unwrap();
             sleep(Duration::from_millis(1000)).await;
         }
     });
 
-    sleep(Duration::from_millis(10 * 1000)).await;
+    handle.await?;
     Ok(())
 }
 
@@ -92,7 +87,7 @@ async fn icmp_echo_reply_listener_with_timeout(
                 let elapsed_ms= timestamp_icmp_sent.elapsed().as_micros() as f64 / 1000.0;
                 println!("Echo reply from {ip:?}, id: {identifier}  seq: {seqence_number}  time: {elapsed_ms:.3} ms");
                 break;
-            }else{
+            } else {
                 log::error!("怪しいパケット受信");
             }
         }
@@ -103,6 +98,6 @@ async fn icmp_echo_reply_listener_with_timeout(
         Err(e) => {
             log::warn!("ICMP Echo timeout! {:?}", e);
             println!("Timeout!");
-        },
+        }
     }
 }

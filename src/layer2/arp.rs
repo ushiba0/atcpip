@@ -137,7 +137,13 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
     *ARP_REPLY_NOTIFIER.lock().await = Some(arp_reply_receiver);
 
     loop {
-        let arp = arp_receive.recv().await.unwrap();
+        let arp = match arp_receive.recv().await {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("Some ARP Packets are dropped. {e:?}");
+                continue;
+            }
+        };
 
         let opcode = ArpOpCode::from_u16(arp.opcode).unwrap_or_default();
         match opcode {
