@@ -222,7 +222,7 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
         super::icmp::icmp_handler(icmp_rx_receiver).await;
     });
 
-    // <identifier, Vec<IPv4Frame>>
+    // Buffer for IP Fragmentation.
     let mut tmp_pool: HashMap<u16, Vec<Ipv4Frame>> = HashMap::new();
 
     loop {
@@ -279,7 +279,7 @@ fn ipv4_rebuild_fragment(
         .or_insert(vec![ipv4_frame.clone()]);
 
     // mf==false のパケットが来たら rebuild を実行する。
-    if packets.last()?.get_fragment_mf_bit() == true {
+    if packets.last()?.get_fragment_mf_bit() {
         return None;
     }
 
@@ -317,13 +317,13 @@ fn ipv4_rebuild_fragment(
     }
 
     // range をできるだけ結合する。
-    fn merge_ranges(ranges: &Vec<Range<u16>>) -> Vec<Range<u16>> {
+    fn merge_ranges(ranges: &[Range<u16>]) -> Vec<Range<u16>> {
         if ranges.is_empty() {
             return Vec::new();
         }
 
         // rangesをstartでソート
-        let mut sorted_ranges = ranges.clone();
+        let mut sorted_ranges = ranges.to_owned();
         sorted_ranges.sort_by_key(|r| r.start);
 
         let mut merged_ranges = Vec::new();
@@ -349,16 +349,15 @@ fn ipv4_rebuild_fragment(
     let vec_range = hs.into_iter().collect::<Vec<Range<u16>>>();
     let mergd_range = merge_ranges(&vec_range);
 
-    if mergd_range.len() > 1 {
-        None
-    } else if mergd_range.len() == 1 {
-        let payload =
-            concat_data[mergd_range[0].start as usize..mergd_range[0].end as usize].to_vec();
-        let mut packet1 = packets.first()?.clone();
-        packet1.payload = payload;
-        Some(packet1)
-    } else {
-        None
+    match mergd_range.len() {
+        1 => {
+            let payload =
+                concat_data[mergd_range[0].start as usize..mergd_range[0].end as usize].to_vec();
+            let mut packet1 = packets.first()?.clone();
+            packet1.payload = payload;
+            Some(packet1)
+        }
+        _ => None,
     }
 }
 
@@ -414,7 +413,7 @@ impl Ipv4FrameUnchecked {
         } else {
             // フラグメントしてから送る。
             let mtu = crate::layer2::interface::MTU;
-            let max_payload_size = mtu - IPV4_HEADER_LEN as usize;
+            let max_payload_size = mtu - IPV4_HEADER_LEN;
             let max_payload_size = max_payload_size & (!0b111); // 8 で round する。
             debug_assert_eq!(max_payload_size % 8, 0);
 
