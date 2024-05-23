@@ -103,12 +103,12 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::spawn(async move {
         match handle.await {
-            Ok(inner) => match inner{
+            Ok(inner) => match inner {
                 // タスク、コマンドともに正常終了.
                 Ok(a) => log::info!("Ok: {a:?}"),
                 // タスクは正常終了したが、タスクの戻り値がエラー。
                 Err(e) => log::error!("{e:?}"),
-            }
+            },
             //コマンドを実行したタスクが panic したか、またはランタイムのシャットダウンでタスクが強制終了した。
             Err(e) => log::error!("Task end with error: {e:?}"),
         }

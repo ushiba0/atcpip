@@ -15,7 +15,7 @@ pub async fn main(ipv4addr: Ipv4Addr, count: usize, timeout_ms: u64) -> Result<(
     let stop_count = if count == 0 { usize::MAX } else { count };
     let ip = ipv4addr.octets();
     let mut echo_reqest = Icmp::echo_reqest_minimal();
-    echo_reqest.data = vec![0xda; 100];
+    echo_reqest.data = vec![0xda; 2000];
     // echo_reqest.data = vec![0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x70];
 
     // let  echo_req_test: crate::layer3::ipv4::Ipv4FrameUnchecked = echo_reqest.to_ipv4(ip)?;
@@ -34,7 +34,7 @@ pub async fn main(ipv4addr: Ipv4Addr, count: usize, timeout_ms: u64) -> Result<(
             echo_reqest.sequence_number = seq_num;
             echo_reqest.identifier = id_num;
             let ipv4_frame = echo_reqest.to_ipv4(ip)?;
-            let ipv4_frame = ipv4_frame.build();
+            // let ipv4_frame = ipv4_frame.build();
 
             // Spawn ICMP Echo Reply listener.
             tokio::spawn(icmp_echo_reply_listener_with_timeout(
@@ -46,7 +46,8 @@ pub async fn main(ipv4addr: Ipv4Addr, count: usize, timeout_ms: u64) -> Result<(
             ));
 
             log::trace!("Sending icmp echo request: {ipv4_frame:x?}");
-            ipv4_frame.send().await?;
+            // ipv4_frame.send().await?;
+            ipv4_frame.safely_send().await?;
             sleep(Duration::from_millis(1000)).await;
         }
         Ok(())
@@ -86,7 +87,7 @@ async fn icmp_echo_reply_listener_with_timeout(
             let ipv4frame = icmp_notifier_receiver.recv().await.unwrap();
             let icmp = Icmp::from_buffer(&ipv4frame.payload);
             if icmp.icmp_type == IcmpType::Reply as u8
-                && ipv4frame.header.source_address == ip
+                && ipv4frame.source_address == ip
                 && icmp.identifier == identifier
                 && icmp.sequence_number == seqence_number
             {

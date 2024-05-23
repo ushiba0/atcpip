@@ -3,7 +3,7 @@ use once_cell::sync::Lazy;
 use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
 
-use crate::layer3::ipv4::{Ipv4Frame, Ipv4Header};
+use crate::layer3::ipv4::Ipv4Frame;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u8)]
@@ -60,7 +60,7 @@ impl Icmp {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.extend_from_slice(&self.icmp_type.to_be_bytes());
         bytes.extend_from_slice(&self.code.to_be_bytes());
-        assert_eq!(self._checksum, 0);
+        // assert_eq!(self._checksum, 0);
         bytes.extend_from_slice(&self._checksum.to_be_bytes());
         bytes.extend_from_slice(&self.identifier.to_be_bytes());
         bytes.extend_from_slice(&self.sequence_number.to_be_bytes());
@@ -69,8 +69,7 @@ impl Icmp {
     }
 
     fn get_checksum(&self) -> u16 {
-        let bytes = self.to_bytes();
-        calc_checksum(&bytes)
+        calc_checksum(&self.to_bytes())
     }
 
     // Calculate checksum, and convert to bytes.
@@ -86,9 +85,9 @@ impl Icmp {
         Self {
             icmp_type: buf[0],
             code: buf[1],
-            _checksum: u16::from_be_bytes([buf[2], buf[3]]),
-            identifier: u16::from_be_bytes([buf[4], buf[5]]),
-            sequence_number: u16::from_be_bytes([buf[6], buf[7]]),
+            _checksum: u16::from_be_bytes(buf[2..4].try_into().unwrap()),
+            identifier: u16::from_be_bytes(buf[4..6].try_into().unwrap()),
+            sequence_number: u16::from_be_bytes(buf[6..8].try_into().unwrap()),
             data: buf[8..].to_vec(),
         }
     }
@@ -132,14 +131,17 @@ pub fn calc_checksum(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-async fn send_icmp_echo_reply(ipv4header: Ipv4Header, icmp: Icmp) -> anyhow::Result<()> {
+async fn send_icmp_echo_reply(
+    ipv4_frame: Ipv4Frame,
+    icmp_echo_request: Icmp,
+) -> anyhow::Result<()> {
     let echo_reply = Icmp::echo_reply_minimal()
-        .set_identifier(icmp.identifier)
-        .set_sequence_number(icmp.sequence_number)
-        .set_payload(&icmp.data);
+        .set_identifier(icmp_echo_request.identifier)
+        .set_sequence_number(icmp_echo_request.sequence_number)
+        .set_payload(&icmp_echo_request.data);
 
     echo_reply
-        .to_ipv4(ipv4header.source_address)?
+        .to_ipv4(ipv4_frame.source_address)?
         .build()
         .send()
         .await?;
@@ -163,7 +165,12 @@ pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Frame>) {
         let ipv4frame = icmp_receive.recv().await.unwrap();
         let icmp = Icmp::from_buffer(&ipv4frame.payload);
 
-        // Todo: Checksum と Total length の計算.
+        // Checksum の計算
+        if icmp.get_checksum() != 0 {
+            log::warn!("Detected ICMP checksum error for packet: {ipv4frame:x?}");
+        }
+
+        // Todo: Total length の計算.
 
         let icmp_type = IcmpType::from_u8(icmp.icmp_type).unwrap_or_default();
         match icmp_type {
@@ -173,7 +180,7 @@ pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Frame>) {
             }
             IcmpType::Request => {
                 log::trace!("ICMP Echo Reqest.");
-                send_icmp_echo_reply(ipv4frame.header, icmp).await.unwrap();
+                send_icmp_echo_reply(ipv4frame, icmp).await.unwrap();
             }
             _ => {
                 log::warn!("Uninplemented.");
