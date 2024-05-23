@@ -51,6 +51,10 @@ struct PingCLIOpts {
     /// Echo reply timeout in ms.
     #[clap(long, default_value = "1000")]
     timeout_ms: u64,
+
+    /// ICMP payload size in bytes.
+    #[clap(short, long, default_value = "20")]
+    size: usize,
 }
 
 fn set_loglevel(cli_cmds: &CommandArguments) {
@@ -89,7 +93,9 @@ async fn main() -> anyhow::Result<()> {
         SecondCommand::Ping(opts) => {
             let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
             log::info!("Destination IP Address: {ip:?}");
-            tokio::spawn(async move { crate::pingcmd::main(ip, opts.count, opts.timeout_ms).await })
+            tokio::spawn(async move {
+                crate::pingcmd::main(ip, opts.count, opts.timeout_ms, opts.size).await
+            })
         }
         SecondCommand::Server => {
             use tokio::time::{sleep, Duration};

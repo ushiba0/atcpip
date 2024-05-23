@@ -9,13 +9,18 @@ use tokio::{
 
 use crate::layer3::icmp::{Icmp, IcmpType, ICMP_REPLY_NOTIFIER};
 
-pub async fn main(ipv4addr: Ipv4Addr, count: usize, timeout_ms: u64) -> Result<()> {
+pub async fn main(
+    ipv4addr: Ipv4Addr,
+    count: usize,
+    timeout_ms: u64,
+    data_size: usize,
+) -> Result<()> {
     // stop_count == 0: Loop forever.
     // stop_count > 0: Stops after <stop_count> reply.
     let stop_count = if count == 0 { usize::MAX } else { count };
     let ip = ipv4addr.octets();
     let mut echo_reqest = Icmp::echo_reqest_minimal();
-    echo_reqest.data = vec![0xda; 2000];
+    echo_reqest.data = vec![0xab; data_size];
     // echo_reqest.data = vec![0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x70];
 
     // let  echo_req_test: crate::layer3::ipv4::Ipv4FrameUnchecked = echo_reqest.to_ipv4(ip)?;

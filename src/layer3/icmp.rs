@@ -168,6 +168,7 @@ pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Frame>) {
         // Checksum の計算
         if icmp.get_checksum() != 0 {
             log::warn!("Detected ICMP checksum error for packet: {ipv4frame:x?}");
+            continue;
         }
 
         // Todo: Total length の計算.
