@@ -18,6 +18,8 @@ const PNET_RX_TIMEOUT_MICROSEC: u64 = 1000; // 1 ms
 static SEND_HANDLE: Lazy<Mutex<Option<tokio::sync::broadcast::Sender<EthernetFrame>>>> =
     Lazy::new(|| Mutex::new(None));
 
+const BUFFER_SIZE_DATALINK_SEND_CHANNEL: usize = 100;
+
 async fn get_channel() -> anyhow::Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
     let interfaces = pnet::datalink::interfaces();
     log::trace!("Network interfaces on this host: {:?}", interfaces);
@@ -53,12 +55,18 @@ pub async fn send_to_pnet(ethernet_frame: EthernetFrame) -> anyhow::Result<usize
         .await
         .as_ref()
         .unwrap()
-        .send(ethernet_frame)
-        .context("[send_to_pnet] Send to pnet tx error.")
+        .send(ethernet_frame.clone())
+        .context(format!(
+            "[send_to_pnet] Send to pnet tx error. {:?}, payload size: {}",
+            ethernet_frame.header,
+            ethernet_frame.payload.len()
+        ))
+    // .context("[send_to_pnet] Send to pnet tx error.")
 }
 
 pub async fn spawn_tx_handler() {
-    let (iface_send, mut iface_recv) = broadcast::channel::<EthernetFrame>(2);
+    let (iface_send, mut iface_recv) =
+        broadcast::channel::<EthernetFrame>(BUFFER_SIZE_DATALINK_SEND_CHANNEL);
     let (mut tx, mut rx) = get_channel().await.unwrap();
 
     *SEND_HANDLE.lock().await = Some(iface_send);
@@ -119,9 +127,14 @@ pub async fn spawn_tx_handler() {
     // Datalink Tx.
     tokio::spawn(async move {
         log::info!("Spawned Datalink Tx handler.");
-        while let Ok(eth_frame) = iface_recv.recv().await {
-            let packet = eth_frame.build_to_packet();
-            tx.send_to(&packet, None);
+        loop {
+            match iface_recv.recv().await {
+                Ok(eth_frame) => {
+                    let packet = eth_frame.build_to_packet();
+                    tx.send_to(&packet, None);
+                }
+                Err(e) => log::error!("Datalink Tx handler error {e:?}"),
+            }
         }
     });
 }

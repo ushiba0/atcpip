@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Range;
 
 use bit_field::BitField;
@@ -152,14 +152,6 @@ impl Ipv4Frame {
 }
 
 impl Ipv4Frame {
-    // pub fn minimal() -> Self {
-    //     Self {
-    //         header: Ipv4Header::minimal(),
-    //         payload: Vec::new(),
-    //         ..Default::default()
-    //     }
-    // }
-
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.extend_from_slice(&self.header_build_to_bytes());
@@ -183,14 +175,6 @@ impl Ipv4Frame {
         self.total_length = total_length as u16;
         self.to_bytes()
     }
-
-    // pub fn from_buffer(buf: &[u8]) -> Self {
-    //     Self {
-    //         header: Ipv4Header::from_buffer(&buf[..IPV4_HEADER_LEN]),
-    //         payload: buf[IPV4_HEADER_LEN..].to_vec(),
-    //         ..Default::default()
-    //     }
-    // }
 
     fn set_destinatoin_address(mut self, ip: [u8; 4]) -> Self {
         self.destination_address = ip;
@@ -278,87 +262,63 @@ fn ipv4_rebuild_fragment(
         })
         .or_insert(vec![ipv4_frame.clone()]);
 
-    // mf==false のパケットが来たら rebuild を実行する。
+    // MF==true のパケットの場合は return する。
+    // 現在の実装では MF==false のパケットが来ない限り rebuild しない。
     if packets.last()?.get_fragment_mf_bit() {
         return None;
     }
 
-    let mut hs: HashSet<Range<u16>> = HashSet::new();
-    let mut concat_data = vec![0u8; 65536];
+    // MF==false のパケットを受け取ったら即 pool から廃棄する。
+    let packets = tmp_pool.remove(&ipv4_frame.identification)?;
 
-    // 区間に被りがあるか確認する関数。
-    fn test_range(hs: &HashSet<Range<u16>>, ran: &Range<u16>) -> bool {
-        let start = ran.start;
-        let end = ran.end;
-        for hanni in hs {
-            if hanni.contains(&start) || hanni.contains(&end) {
-                return false;
-            }
-        }
-        true
-    }
+    let mut fragment_range_list: Vec<Range<usize>> = Vec::new();
+    let mut concatenated_payload = vec![0u8; 65536];
 
     for packet in packets.iter() {
-        let size = packet.total_length - IPV4_HEADER_LEN as u16;
-        let off = packet.get_fragment_offset();
-        let range_start = off;
-        let range_end = range_start + size;
-        let ra = range_start..range_end;
-
-        if test_range(&hs, &ra) {
-            // 挿入していいか判断して、OK ならいれる。
-            hs.insert(ra);
-            concat_data[(range_start as usize)..(range_end as usize)]
-                .copy_from_slice(&packet.payload);
-        } else {
-            log::error!("区間に被りがあるので後で破棄すべき。");
-            return None;
-        }
+        let data_size = packet.total_length as usize - IPV4_HEADER_LEN;
+        let data_offset = packet.get_fragment_offset() as usize;
+        let range = (data_offset as usize)..((data_offset + data_size) as usize);
+        fragment_range_list.push(range.clone());
+        concatenated_payload[range].copy_from_slice(&packet.payload[..data_size as usize]);
     }
 
-    // range をできるだけ結合する。
-    fn merge_ranges(ranges: &[Range<u16>]) -> Vec<Range<u16>> {
-        if ranges.is_empty() {
-            return Vec::new();
-        }
-
-        // rangesをstartでソート
+    // Range を結合し、そのサイズを返す。
+    // Range に Hole や被りがあると None を返す。
+    fn test_merge_ranges(ranges: &[Range<usize>]) -> Option<usize> {
+        // ranges を start でソート。
         let mut sorted_ranges = ranges.to_owned();
         sorted_ranges.sort_by_key(|r| r.start);
 
-        let mut merged_ranges = Vec::new();
-        let mut current_range = sorted_ranges[0].clone();
+        if sorted_ranges.get(0)?.start != 0 {
+            log::warn!("Range start is not 0.");
+            return None;
+        }
 
-        for range in sorted_ranges.into_iter().skip(1) {
-            if range.start <= current_range.end {
-                // 現在の範囲に結合できる場合、endを更新
-                current_range.end = current_range.end.max(range.end);
+        let mut current_end = 0;
+        for range in ranges.iter() {
+            if range.start == current_end {
+                current_end = range.end;
             } else {
-                // 現在の範囲をmerged_rangesに追加し、新しい範囲を設定
-                merged_ranges.push(current_range);
-                current_range = range.clone();
+                log::warn!("Range has some hole.");
+                return None;
             }
         }
 
-        // 最後の範囲を追加
-        merged_ranges.push(current_range);
-
-        merged_ranges
+        log::trace!("IPv4 will be reassembled in range: 0..{current_end}");
+        Some(current_end)
     }
 
-    let vec_range = hs.into_iter().collect::<Vec<Range<u16>>>();
-    let mergd_range = merge_ranges(&vec_range);
+    let mergd_range = if let Some(val) = test_merge_ranges(&fragment_range_list) {
+        val
+    } else {
+        log::warn!("IPv4 reassemble range error.");
+        tmp_pool.remove(&ipv4_frame.identification);
+        return None;
+    };
 
-    match mergd_range.len() {
-        1 => {
-            let payload =
-                concat_data[mergd_range[0].start as usize..mergd_range[0].end as usize].to_vec();
-            let mut packet1 = packets.first()?.clone();
-            packet1.payload = payload;
-            Some(packet1)
-        }
-        _ => None,
-    }
+    let reassembled_payload = concatenated_payload[0..mergd_range as usize].to_vec();
+    let pkt = packets.first()?.clone().set_payload(&reassembled_payload);
+    Some(pkt)
 }
 
 /* ======== */
@@ -393,7 +353,7 @@ impl Ipv4FrameUnchecked {
         self
     }
 
-    pub fn build(&self) -> Ipv4Frame {
+    fn build(&self) -> Ipv4Frame {
         if self.payload.len() <= crate::layer2::interface::MTU {
             // フラグメントしなくていいのでそのまま送る。
             Ipv4Frame::minimal()
@@ -401,13 +361,13 @@ impl Ipv4FrameUnchecked {
                 .set_protcol(self.protcol)
                 .set_payload(&self.payload)
         } else {
-            // フラグメントしてから送る。
+            // フラグメントしてから送る
             unimplemented!()
         }
     }
 
     pub fn to_safe_ipv4_frame(&self) -> Vec<Ipv4Frame> {
-        if self.payload.len() <= crate::layer2::interface::MTU {
+        if self.payload.len() <= crate::layer2::interface::MTU - IPV4_HEADER_LEN {
             // フラグメントしなくていいのでそのまま送る。
             vec![self.build()]
         } else {

@@ -104,7 +104,8 @@ impl EthernetFrame {
     fn validate_mtu(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.payload.len() <= super::interface::MTU,
-            "Ethernet payload exceeds MTU."
+            "Ethernet payload ({}) exceeds MTU.",
+            self.payload.len()
         );
         Ok(())
     }

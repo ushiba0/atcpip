@@ -92,13 +92,6 @@ impl Icmp {
         }
     }
 
-    // pub fn to_ipv4_frame(&self, ip: [u8; 4]) -> Ipv4Frame {
-    //     let mut ipv4_frame = Ipv4Frame::minimal();
-    //     ipv4_frame.header.destination_address = ip;
-    //     ipv4_frame.payload = self.build_to_bytes();
-    //     ipv4_frame
-    // }
-
     pub fn to_ipv4(&self, ip: [u8; 4]) -> anyhow::Result<super::ipv4::Ipv4FrameUnchecked> {
         super::ipv4::Ipv4FrameUnchecked::new()
             .set_ipav4addr(ip)
@@ -142,11 +135,14 @@ async fn send_icmp_echo_reply(
 
     echo_reply
         .to_ipv4(ipv4_frame.source_address)?
-        .build()
-        .send()
+        .safely_send()
         .await?;
 
-    log::trace!("Sent an ICMP Echo Reply: {echo_reply:?}");
+    log::trace!(
+        "Sent an ICMP Echo Reply to IP {:?}. ICMP data size: {}.",
+        ipv4_frame.source_address,
+        icmp_echo_request.data.len()
+    );
     Ok(())
 }
 
