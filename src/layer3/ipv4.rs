@@ -18,7 +18,10 @@ const IPV4_MAX_PAYLOAD_SIZE: usize = 65536;
 #[repr(u8)]
 pub enum Ipv4Protcol {
     Icmp = 0x01,
-    // Reply = 0x0,
+    Ip = 0x04,
+    Tcp = 0x06,
+    Udp = 17,
+    Ipv6 = 41,
     #[default]
     Invalid = 0xff,
 }
@@ -199,7 +202,6 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
         // Checksum の確認
         if ipv4frame.get_checksum() != 0 {
             log::warn!("Detected IPv4 checksum error for packet: {ipv4frame:x?}");
-            // Continue することで Drop する。
             // Todo: Error stats counter を実装してカウントアップする。
             continue;
         }
@@ -223,7 +225,7 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
             }
 
             _ => {
-                log::warn!("Uninplemented.");
+                log::warn!("Uninplemented IPv4 protcol: {protcol:?}");
             }
         }
     }

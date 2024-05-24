@@ -19,14 +19,7 @@ pub async fn main(
     // stop_count > 0: Stops after <stop_count> reply.
     let stop_count = if count == 0 { usize::MAX } else { count };
     let ip = ipv4addr.octets();
-    let mut echo_reqest = Icmp::echo_reqest_minimal();
-    echo_reqest.data = vec![0xab; data_size];
-    // echo_reqest.data = vec![0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x70];
-
-    // let  echo_req_test: crate::layer3::ipv4::Ipv4FrameUnchecked = echo_reqest.to_ipv4(ip)?;
-    // let echo_req_checked = echo_req_test.build();
-    // echo_req_checked.send().await.unwrap();
-    // echo_req_test.
+    let mut echo_reqest = Icmp::echo_reqest_minimal().set_payload(&vec![0xab; data_size]);
 
     // Send ICMP Echo request packet every 1 sec.
     let handle: JoinHandle<Result<()>> = tokio::spawn(async move {
@@ -39,7 +32,6 @@ pub async fn main(
             echo_reqest.sequence_number = seq_num;
             echo_reqest.identifier = id_num;
             let ipv4_frame = echo_reqest.to_ipv4(ip)?;
-            // let ipv4_frame = ipv4_frame.build();
 
             // Spawn ICMP Echo Reply listener.
             tokio::spawn(icmp_echo_reply_listener_with_timeout(
@@ -51,7 +43,6 @@ pub async fn main(
             ));
 
             log::trace!("Sending icmp echo request: {ipv4_frame:x?}");
-            // ipv4_frame.send().await?;
             ipv4_frame.safely_send().await?;
             sleep(Duration::from_millis(1000)).await;
         }
@@ -71,7 +62,6 @@ pub async fn main(
    identify a session, and the sequence number might be incremented
    on each echo request sent.  The echoer returns these same values
    in the echo reply.
-
 */
 
 // 指定した identifier, seqence_number の ICMP Echo Reply をタイムアウト付きで待ち受ける。

@@ -1,3 +1,4 @@
+use bytes::{Bytes, BytesMut};
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 use tokio::sync::broadcast::{self, Receiver};
@@ -21,7 +22,7 @@ pub struct Icmp {
     _checksum: u16, // Should always be zero. Checksum can be calc with self.get_checksum().
     pub identifier: u16,
     pub sequence_number: u16,
-    pub data: Vec<u8>, // Timestamp (8 bytes) + Data (40 bytes).
+    pub data: Bytes, // Timestamp (8 bytes) + Data (40 bytes).
 }
 
 impl Icmp {
@@ -52,15 +53,14 @@ impl Icmp {
     }
 
     pub fn set_payload(mut self, data: &[u8]) -> Self {
-        self.data = data.to_vec();
+        self.data = Bytes::copy_from_slice(data);
         self
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
+    fn to_bytes_inner(&self) -> BytesMut {
+        let mut bytes = BytesMut::new();
         bytes.extend_from_slice(&self.icmp_type.to_be_bytes());
         bytes.extend_from_slice(&self.code.to_be_bytes());
-        // assert_eq!(self._checksum, 0);
         bytes.extend_from_slice(&self._checksum.to_be_bytes());
         bytes.extend_from_slice(&self.identifier.to_be_bytes());
         bytes.extend_from_slice(&self.sequence_number.to_be_bytes());
@@ -68,17 +68,17 @@ impl Icmp {
         bytes
     }
 
-    fn get_checksum(&self) -> u16 {
-        calc_checksum(&self.to_bytes())
-    }
-
     // Calculate checksum, and convert to bytes.
-    pub fn build_to_bytes(&self) -> Vec<u8> {
-        let mut bytes = self.to_bytes();
-        let checksum = self.get_checksum().to_be_bytes();
+    pub fn build_to_bytes(&self) -> Bytes {
+        let mut bytes = self.to_bytes_inner();
+        let checksum = super::icmp::calc_checksum(&bytes).to_be_bytes();
         bytes[2] = checksum[0];
         bytes[3] = checksum[1];
-        bytes
+        bytes.freeze()
+    }
+
+    fn get_checksum(&self) -> u16 {
+        calc_checksum(&self.to_bytes_inner())
     }
 
     pub fn from_buffer(buf: &[u8]) -> Self {
@@ -88,7 +88,7 @@ impl Icmp {
             _checksum: u16::from_be_bytes(buf[2..4].try_into().unwrap()),
             identifier: u16::from_be_bytes(buf[4..6].try_into().unwrap()),
             sequence_number: u16::from_be_bytes(buf[6..8].try_into().unwrap()),
-            data: buf[8..].to_vec(),
+            data: Bytes::copy_from_slice(&buf[8..]),
         }
     }
 
@@ -191,6 +191,6 @@ fn test_icmp_checksum() {
     let echo_reqest = Icmp::echo_reqest_minimal()
         .set_identifier(0x7f16)
         .set_sequence_number(60)
-        .set_payload(&vec![0xda; 100]);
+        .set_payload(&[0xda; 100]);
     assert_eq!(echo_reqest.get_checksum(), 0xb9ee);
 }
