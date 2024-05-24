@@ -252,7 +252,7 @@ fn ipv4_rebuild_fragment(
         .context("No packtes.")?;
 
     let mut fragment_range_list: Vec<Range<usize>> = Vec::new();
-    let mut concatenated_payload = BytesMut::with_capacity(IPV4_MAX_PAYLOAD_SIZE);
+    let mut concatenated_payload = BytesMut::zeroed(IPV4_MAX_PAYLOAD_SIZE);
 
     for packet in packets.iter() {
         let data_size = packet.total_length as usize - IPV4_HEADER_LEN;
