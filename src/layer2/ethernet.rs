@@ -147,7 +147,7 @@ pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> anyhow::Re
 
     let ether_frame = EthernetFrame {
         header: eth_header,
-        payload: ipv4_frame.clone().build_to_bytes(),
+        payload: ipv4_frame.clone().build_to_bytes().to_vec(),
     };
 
     ether_frame.send().await

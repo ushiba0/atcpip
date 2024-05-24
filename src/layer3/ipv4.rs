@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use anyhow::{bail, Context};
 use bit_field::BitField;
+use bytes::{Bytes, BytesMut};
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 use rand::Rng;
@@ -10,6 +12,7 @@ use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
 
 const IPV4_HEADER_LEN: usize = 20;
+const IPV4_MAX_PAYLOAD_SIZE: usize = 65536;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u8)]
@@ -19,23 +22,6 @@ pub enum Ipv4Protcol {
     #[default]
     Invalid = 0xff,
 }
-
-// #[derive(Default, Debug, Clone, Copy)]
-// pub struct Ipv4Header {
-//     pub version_and_header_length: u8, // Default: 0b0100_0101
-//     pub differenciate_service_field: u8,
-//     pub total_length: u16,
-//     pub identification: u16,
-//     // 上位 1 bit: reserved
-//     //      2 bit: DF 0 = May Fragment, 1 = Don't Fragment.
-//     //      3 bit: MF 0 = Last Fragment, 1 = More Fragments.
-//     pub flags: u16, // Default: 0.
-//     pub time_to_live: u8,
-//     pub protocol: u8,
-//     _header_checksum: u16, // Should always be zero. Checksum can be calc with self.get_checksum().
-//     pub source_address: [u8; 4],
-//     pub destination_address: [u8; 4],
-// }
 
 // サイズが MTU に収まっている。
 // length, identification, checksum なども計算済みである。
@@ -51,12 +37,12 @@ pub struct Ipv4Frame {
     pub flags: u16, // Default: 0.
     pub time_to_live: u8,
     pub protocol: u8,
-    _header_checksum: u16, // Should always be zero. Checksum can be calc with self.get_checksum().
+    _header_checksum: u16,
     pub source_address: [u8; 4],
     pub destination_address: [u8; 4],
 
     // pub header: Ipv4Header,
-    pub payload: Vec<u8>,
+    pub payload: Bytes,
 }
 
 impl Ipv4Frame {
@@ -84,12 +70,13 @@ impl Ipv4Frame {
             _header_checksum: u16::from_be_bytes([buf[10], buf[11]]),
             source_address: [buf[12], buf[13], buf[14], buf[15]],
             destination_address: [buf[16], buf[17], buf[18], buf[19]],
-            payload: buf[20..].to_vec(),
+            payload: Bytes::copy_from_slice(&buf[20..]),
         }
     }
 
-    fn header_to_bytes(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
+    // IPv4 Header を Bytes に変換. checksum, length などは計算せずにシンプルにバイト列に変換する。
+    fn get_header_bytes(&self) -> BytesMut {
+        let mut bytes = BytesMut::new();
         bytes.extend_from_slice(&self.version_and_header_length.to_be_bytes());
         bytes.extend_from_slice(&self.differenciate_service_field.to_be_bytes());
         bytes.extend_from_slice(&self.total_length.to_be_bytes());
@@ -97,30 +84,49 @@ impl Ipv4Frame {
         bytes.extend_from_slice(&self.flags.to_be_bytes());
         bytes.extend_from_slice(&self.time_to_live.to_be_bytes());
         bytes.extend_from_slice(&self.protocol.to_be_bytes());
-        // assert_eq!(self._header_checksum, 0);
         bytes.extend_from_slice(&self._header_checksum.to_be_bytes());
         bytes.extend_from_slice(&self.source_address);
         bytes.extend_from_slice(&self.destination_address);
-
         bytes
+    }
+
+    // Header checksum を計算したうえでバイト列に変換する。
+    fn get_header_bytes_with_checksum(&self) -> Bytes {
+        let mut bytes = self.get_header_bytes();
+        let checksum = super::icmp::calc_checksum(&bytes).to_be_bytes();
+        // let checksum = self.get_checksum().to_be_bytes();
+        bytes[10] = checksum[0];
+        bytes[11] = checksum[1];
+        bytes.freeze()
+    }
+
+    // Concatinate header bytes and payload bytes.
+    fn to_bytes_inner(&self) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.extend_from_slice(&self.get_header_bytes_with_checksum());
+        bytes.extend_from_slice(&self.payload);
+        bytes.freeze()
+    }
+
+    // Calculate checksum, fill total_length
+    // and convert to bytes.
+    pub fn build_to_bytes(&mut self) -> Bytes {
+        assert_eq!(
+            self.version_and_header_length, 0b0100_0101,
+            "Panic here because the current implementation assumes an Ipv4 header length of 20."
+        );
+        self.total_length = (IPV4_HEADER_LEN + self.payload.len()) as u16;
+        self.to_bytes_inner()
     }
 
     // Todo: 今の実装では header のバイト列を生成するときに to_bytes() を 2 回
     // 呼び出しているのでパフォーマンスを気にする場合はメモ化しておく。
     fn get_checksum(&self) -> u16 {
-        let bytes = self.header_to_bytes();
+        let bytes = self.get_header_bytes();
         super::icmp::calc_checksum(&bytes)
     }
 
-    // Calculate IP header checksum and convert to bytes.
-    fn header_build_to_bytes(&self) -> Vec<u8> {
-        let mut bytes = self.header_to_bytes();
-        let checksum = self.get_checksum().to_be_bytes();
-        bytes[10] = checksum[0];
-        bytes[11] = checksum[1];
-        bytes
-    }
-
+    #[allow(dead_code)]
     fn get_fragment_df_bit(&self) -> bool {
         self.flags.get_bit(14)
     }
@@ -149,31 +155,9 @@ impl Ipv4Frame {
         self.flags.set_bits(0..13, offset);
         self
     }
-}
-
-impl Ipv4Frame {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
-        bytes.extend_from_slice(&self.header_build_to_bytes());
-        bytes.extend_from_slice(&self.payload);
-        bytes
-    }
 
     pub async fn send(&self) -> anyhow::Result<usize> {
         crate::layer2::ethernet::send_ipv4(self.clone()).await
-    }
-
-    // Calculate checksum, fill total_length
-    // and convert to bytes.
-    pub fn build_to_bytes(&mut self) -> Vec<u8> {
-        assert_eq!(
-            self.version_and_header_length, 0b0100_0101,
-            "Panic here because the current implementation assumes an Ipv4 header length of 20."
-        );
-        let header_length = IPV4_HEADER_LEN;
-        let total_length = header_length + self.payload.len();
-        self.total_length = total_length as u16;
-        self.to_bytes()
     }
 
     fn set_destinatoin_address(mut self, ip: [u8; 4]) -> Self {
@@ -187,7 +171,7 @@ impl Ipv4Frame {
     }
 
     fn set_payload(mut self, payload: &[u8]) -> Self {
-        self.payload = payload.to_vec();
+        self.payload = Bytes::copy_from_slice(payload);
         self.total_length = (IPV4_HEADER_LEN + self.payload.len()) as u16;
         self
     }
@@ -222,21 +206,15 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
 
         // リビルド。
         let ipv4frame = match ipv4_rebuild_fragment(&mut tmp_pool, &ipv4frame) {
-            Some(v) => v,
-            None => continue,
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("IPv4 packet reassemble failed. {e:?}");
+                continue;
+            }
         };
 
         // Todo:  Total length の確認。
         // Todo: 自分宛ての IP Address か確かめる。
-
-        if ipv4frame.get_fragment_df_bit() {
-            // 受信側が DF フラグを処理する必要はない。
-        }
-
-        if ipv4frame.get_fragment_mf_bit() {
-            // 1 ならキューに貯める。
-            // 0 なら一旦 identifier をチェックする必要がある。
-        }
 
         let protcol = Ipv4Protcol::from_u8(ipv4frame.protocol).unwrap_or_default();
         match protcol {
@@ -254,8 +232,8 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
 fn ipv4_rebuild_fragment(
     tmp_pool: &mut HashMap<u16, Vec<Ipv4Frame>>,
     ipv4_frame: &Ipv4Frame,
-) -> Option<Ipv4Frame> {
-    let packets = tmp_pool
+) -> anyhow::Result<Ipv4Frame> {
+    tmp_pool
         .entry(ipv4_frame.identification)
         .and_modify(|val| {
             val.push(ipv4_frame.clone());
@@ -264,61 +242,54 @@ fn ipv4_rebuild_fragment(
 
     // MF==true のパケットの場合は return する。
     // 現在の実装では MF==false のパケットが来ない限り rebuild しない。
-    if packets.last()?.get_fragment_mf_bit() {
-        return None;
+    if ipv4_frame.get_fragment_mf_bit() {
+        bail!("MF==true なのでリアセンブルしない。");
     }
 
     // MF==false のパケットを受け取ったら即 pool から廃棄する。
-    let packets = tmp_pool.remove(&ipv4_frame.identification)?;
+    let packets = tmp_pool
+        .remove(&ipv4_frame.identification)
+        .context("No packtes.")?;
 
     let mut fragment_range_list: Vec<Range<usize>> = Vec::new();
-    let mut concatenated_payload = vec![0u8; 65536];
+    let mut concatenated_payload = BytesMut::with_capacity(IPV4_MAX_PAYLOAD_SIZE);
 
     for packet in packets.iter() {
         let data_size = packet.total_length as usize - IPV4_HEADER_LEN;
         let data_offset = packet.get_fragment_offset() as usize;
-        let range = (data_offset as usize)..((data_offset + data_size) as usize);
+        let range = data_offset..(data_offset + data_size);
         fragment_range_list.push(range.clone());
-        concatenated_payload[range].copy_from_slice(&packet.payload[..data_size as usize]);
+        concatenated_payload[range].copy_from_slice(&packet.payload[..data_size]);
     }
 
-    // Range を結合し、そのサイズを返す。
-    // Range に Hole や被りがあると None を返す。
-    fn test_merge_ranges(ranges: &[Range<usize>]) -> Option<usize> {
-        // ranges を start でソート。
-        let mut sorted_ranges = ranges.to_owned();
-        sorted_ranges.sort_by_key(|r| r.start);
+    let merged_range = concatenate_ranges(&fragment_range_list)?;
+    let reassembled_payload = &concatenated_payload[0..merged_range];
+    let reassembled_packet = ipv4_frame.clone().set_payload(reassembled_payload);
+    Ok(reassembled_packet)
+}
 
-        if sorted_ranges.get(0)?.start != 0 {
-            log::warn!("Range start is not 0.");
-            return None;
-        }
+// Range を結合し、そのサイズを返す。
+// Range に Hole や被りがあると Err を返す。
+fn concatenate_ranges(ranges: &[Range<usize>]) -> anyhow::Result<usize> {
+    // ranges を start でソート。
+    let mut sorted_ranges = ranges.to_owned();
+    sorted_ranges.sort_by_key(|r| r.start);
 
-        let mut current_end = 0;
-        for range in ranges.iter() {
-            if range.start == current_end {
-                current_end = range.end;
-            } else {
-                log::warn!("Range has some hole.");
-                return None;
-            }
-        }
-
-        log::trace!("IPv4 will be reassembled in range: 0..{current_end}");
-        Some(current_end)
+    if sorted_ranges.first().context("Empty.")?.start != 0 {
+        bail!("Range start is not 0.");
     }
 
-    let mergd_range = if let Some(val) = test_merge_ranges(&fragment_range_list) {
-        val
-    } else {
-        log::warn!("IPv4 reassemble range error.");
-        tmp_pool.remove(&ipv4_frame.identification);
-        return None;
-    };
+    let mut current_end = 0;
+    for range in ranges.iter() {
+        if range.start == current_end {
+            current_end = range.end;
+        } else {
+            bail!("Range has some hole.")
+        }
+    }
 
-    let reassembled_payload = concatenated_payload[0..mergd_range as usize].to_vec();
-    let pkt = packets.first()?.clone().set_payload(&reassembled_payload);
-    Some(pkt)
+    log::trace!("IPv4 will be reassembled in range: 0..{current_end}");
+    Ok(current_end)
 }
 
 /* ======== */
@@ -327,7 +298,7 @@ fn ipv4_rebuild_fragment(
 pub struct Ipv4FrameUnchecked {
     destination_address: [u8; 4],
     protcol: Ipv4Protcol,
-    payload: Vec<u8>,
+    payload: Bytes,
 }
 
 // 外部のサービスが IPv4 を触るときは必ずこの構造体経由で操作するようにしたい。
@@ -342,9 +313,11 @@ impl Ipv4FrameUnchecked {
     }
 
     pub fn set_payload(mut self, payload: &[u8]) -> anyhow::Result<Self> {
-        let payload = payload.to_vec();
-        anyhow::ensure!(payload.len() < 65536, "IPv4 payload size exceeds maximum.");
-        self.payload = payload.to_vec();
+        anyhow::ensure!(
+            payload.len() < IPV4_MAX_PAYLOAD_SIZE,
+            "IPv4 payload size exceeds maximum."
+        );
+        self.payload = Bytes::copy_from_slice(payload);
         Ok(self)
     }
 
@@ -366,7 +339,7 @@ impl Ipv4FrameUnchecked {
         }
     }
 
-    pub fn to_safe_ipv4_frame(&self) -> Vec<Ipv4Frame> {
+    pub fn to_safe_ipv4_frames(&self) -> Vec<Ipv4Frame> {
         if self.payload.len() <= crate::layer2::interface::MTU - IPV4_HEADER_LEN {
             // フラグメントしなくていいのでそのまま送る。
             vec![self.build()]
@@ -405,7 +378,7 @@ impl Ipv4FrameUnchecked {
     }
 
     pub async fn safely_send(&self) -> anyhow::Result<()> {
-        for p in self.to_safe_ipv4_frame() {
+        for p in self.to_safe_ipv4_frames() {
             p.send().await?;
         }
         Ok(())
