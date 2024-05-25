@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
 
+use crate::common::calc_checksum;
 use crate::layer3::ipv4::Ipv4Frame;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
@@ -71,7 +72,7 @@ impl Icmp {
     // Calculate checksum, and convert to bytes.
     pub fn build_to_bytes(&self) -> Bytes {
         let mut bytes = self.to_bytes_inner();
-        let checksum = super::icmp::calc_checksum(&bytes).to_be_bytes();
+        let checksum = calc_checksum(&bytes).to_be_bytes();
         bytes[2] = checksum[0];
         bytes[3] = checksum[1];
         bytes.freeze()
@@ -98,30 +99,6 @@ impl Icmp {
             .set_protcol(super::ipv4::Ipv4Protcol::Icmp)
             .set_payload(&self.build_to_bytes())
     }
-}
-
-pub fn calc_checksum(data: &[u8]) -> u16 {
-    let mut sum = 0usize;
-    let mut chunks = data.chunks_exact(2);
-
-    // 2 バイトずつ読み取り和を取る.
-    for chunk in chunks.by_ref() {
-        let part = u16::from_be_bytes([chunk[0], chunk[1]]);
-        sum = sum.wrapping_add(part as usize);
-    }
-
-    // data.len() が奇数長の場合は最後の 1 バイトを処理する.
-    if let Some(&last_byte) = chunks.remainder().first() {
-        let part = u16::from_be_bytes([last_byte, 0]);
-        sum = sum.wrapping_add(part as usize);
-    }
-
-    // Handle carries.
-    while (sum >> 16) != 0 {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-
-    !(sum as u16)
 }
 
 async fn send_icmp_echo_reply(

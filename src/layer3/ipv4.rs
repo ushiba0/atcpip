@@ -9,7 +9,13 @@ use once_cell::sync::Lazy;
 use rand::Rng;
 
 use tokio::sync::broadcast::{self, Receiver};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinHandle;
+
+use crate::common::calc_checksum;
+use crate::layer2::interface::MY_IP_ADDRESS;
+
+mod reassemble_ipv4;
 
 const IPV4_HEADER_LEN: usize = 20;
 const IPV4_MAX_PAYLOAD_SIZE: usize = 65536;
@@ -71,8 +77,8 @@ impl Ipv4Frame {
             time_to_live: buf[8],
             protocol: buf[9],
             _header_checksum: u16::from_be_bytes([buf[10], buf[11]]),
-            source_address: [buf[12], buf[13], buf[14], buf[15]],
-            destination_address: [buf[16], buf[17], buf[18], buf[19]],
+            source_address: buf[12..16].try_into().unwrap(),
+            destination_address: buf[16..20].try_into().unwrap(),
             payload: Bytes::copy_from_slice(&buf[20..]),
         }
     }
@@ -96,7 +102,7 @@ impl Ipv4Frame {
     // Header checksum を計算したうえでバイト列に変換する。
     fn get_header_bytes_with_checksum(&self) -> Bytes {
         let mut bytes = self.get_header_bytes();
-        let checksum = super::icmp::calc_checksum(&bytes).to_be_bytes();
+        let checksum = calc_checksum(&bytes).to_be_bytes();
         // let checksum = self.get_checksum().to_be_bytes();
         bytes[10] = checksum[0];
         bytes[11] = checksum[1];
@@ -126,7 +132,7 @@ impl Ipv4Frame {
     // 呼び出しているのでパフォーマンスを気にする場合はメモ化しておく。
     fn get_checksum(&self) -> u16 {
         let bytes = self.get_header_bytes();
-        super::icmp::calc_checksum(&bytes)
+        calc_checksum(&bytes)
     }
 
     #[allow(dead_code)]
@@ -187,10 +193,17 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
 
     // ICMP の襲来を通知するチャネル.
     let (icmp_rx_sender, icmp_rx_receiver) = broadcast::channel::<Ipv4Frame>(2);
-
     // Spawn ICMP handler.
     tokio::spawn(async move {
         super::icmp::icmp_handler(icmp_rx_receiver).await;
+    });
+
+    // UDP の受信を通知するチャネル.
+    let (udp_rx_sender, udp_rx_receiver) = mpsc::channel::<Ipv4Frame>(2);
+    // Spawn UDP handler.
+    let _: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+        crate::layer4::udp::udp_handler(udp_rx_receiver).await?;
+        Ok(())
     });
 
     // Buffer for IP Fragmentation.
@@ -198,6 +211,10 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
 
     loop {
         let ipv4frame = ipv4_receive.recv().await.unwrap();
+
+        if ipv4frame.destination_address != MY_IP_ADDRESS {
+            continue;
+        }
 
         // Checksum の確認
         if ipv4frame.get_checksum() != 0 {
@@ -207,7 +224,7 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
         }
 
         // リビルド。
-        let ipv4frame = match ipv4_rebuild_fragment(&mut tmp_pool, &ipv4frame) {
+        let ipv4frame = match reassemble_ipv4::reassemble(&mut tmp_pool, &ipv4frame) {
             Ok(v) => v,
             Err(e) => {
                 log::warn!("IPv4 packet reassemble failed. {e:?}");
@@ -216,14 +233,15 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
         };
 
         // Todo:  Total length の確認。
-        // Todo: 自分宛ての IP Address か確かめる。
 
         let protcol = Ipv4Protcol::from_u8(ipv4frame.protocol).unwrap_or_default();
         match protcol {
             Ipv4Protcol::Icmp => {
                 icmp_rx_sender.send(ipv4frame).unwrap();
             }
-
+            Ipv4Protcol::Udp => {
+                udp_rx_sender.send(ipv4frame).await.unwrap();
+            }
             _ => {
                 log::warn!("Uninplemented IPv4 protcol: {protcol:?}");
             }
@@ -231,68 +249,67 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
     }
 }
 
-fn ipv4_rebuild_fragment(
-    tmp_pool: &mut HashMap<u16, Vec<Ipv4Frame>>,
-    ipv4_frame: &Ipv4Frame,
-) -> anyhow::Result<Ipv4Frame> {
-    tmp_pool
-        .entry(ipv4_frame.identification)
-        .and_modify(|val| {
-            val.push(ipv4_frame.clone());
-        })
-        .or_insert(vec![ipv4_frame.clone()]);
+// fn ipv4_rebuild_fragment(
+//     tmp_pool: &mut HashMap<u16, Vec<Ipv4Frame>>,
+//     ipv4_frame: &Ipv4Frame,
+// ) -> anyhow::Result<Ipv4Frame> {
+//     tmp_pool
+//         .entry(ipv4_frame.identification)
+//         .and_modify(|val| {
+//             val.push(ipv4_frame.clone());
+//         })
+//         .or_insert(vec![ipv4_frame.clone()]);
 
-    // MF==true のパケットの場合は return する。
-    // 現在の実装では MF==false のパケットが来ない限り rebuild しない。
-    if ipv4_frame.get_fragment_mf_bit() {
-        bail!("MF==true なのでリアセンブルしない。");
-    }
+//     // MF==true のパケットの場合は return する。
+//     // 現在の実装では MF==false のパケットが来ない限り rebuild しない。
+//     if ipv4_frame.get_fragment_mf_bit() {
+//         bail!("MF==true なのでリアセンブルしない。");
+//     }
 
-    // MF==false のパケットを受け取ったら即 pool から廃棄する。
-    let packets = tmp_pool
-        .remove(&ipv4_frame.identification)
-        .context("No packtes.")?;
+//     // MF==false のパケットを受け取ったら即 pool から廃棄する。
+//     let packets = tmp_pool
+//         .remove(&ipv4_frame.identification)
+//         .context("No packtes.")?;
 
-    let mut fragment_range_list: Vec<Range<usize>> = Vec::new();
-    let mut concatenated_payload = BytesMut::zeroed(IPV4_MAX_PAYLOAD_SIZE);
+//     let mut fragment_range_list: Vec<Range<usize>> = Vec::new();
+//     let mut concatenated_payload = BytesMut::zeroed(IPV4_MAX_PAYLOAD_SIZE);
 
-    for packet in packets.iter() {
-        let data_size = packet.total_length as usize - IPV4_HEADER_LEN;
-        let data_offset = packet.get_fragment_offset() as usize;
-        let range = data_offset..(data_offset + data_size);
-        fragment_range_list.push(range.clone());
-        concatenated_payload[range].copy_from_slice(&packet.payload[..data_size]);
-    }
+//     for packet in packets.iter() {
+//         let data_size = packet.total_length as usize - IPV4_HEADER_LEN;
+//         let data_offset = packet.get_fragment_offset() as usize;
+//         let range = data_offset..(data_offset + data_size);
+//         fragment_range_list.push(range.clone());
+//         concatenated_payload[range].copy_from_slice(&packet.payload[..data_size]);
+//     }
 
-    let merged_range = concatenate_ranges(&fragment_range_list)?;
-    let reassembled_payload = &concatenated_payload[0..merged_range];
-    let reassembled_packet = ipv4_frame.clone().set_payload(reassembled_payload);
-    Ok(reassembled_packet)
-}
+//     let merged_range = concatenate_ranges(&fragment_range_list)?;
+//     let reassembled_payload = &concatenated_payload[0..merged_range];
+//     let reassembled_packet = ipv4_frame.clone().set_payload(reassembled_payload);
+//     Ok(reassembled_packet)
+// }
 
-// Range を結合し、そのサイズを返す。
-// Range に Hole や被りがあると Err を返す。
-fn concatenate_ranges(ranges: &[Range<usize>]) -> anyhow::Result<usize> {
-    // ranges を start でソート。
-    let mut sorted_ranges = ranges.to_owned();
-    sorted_ranges.sort_by_key(|r| r.start);
+// // Range を結合し、そのサイズを返す。
+// // Range に Hole や被りがあると Err を返す。
+// fn concatenate_ranges(ranges: &[Range<usize>]) -> anyhow::Result<usize> {
+//     // ranges を start でソート。
+//     let mut sorted_ranges = ranges.to_owned();
+//     sorted_ranges.sort_by_key(|r| r.start);
 
-    if sorted_ranges.first().context("Empty.")?.start != 0 {
-        bail!("Range start is not 0.");
-    }
+//     if sorted_ranges.first().context("Empty.")?.start != 0 {
+//         bail!("Range start is not 0.");
+//     }
 
-    let mut current_end = 0;
-    for range in ranges.iter() {
-        if range.start == current_end {
-            current_end = range.end;
-        } else {
-            bail!("Range has some hole.")
-        }
-    }
+//     let mut current_end = 0;
+//     for range in ranges.iter() {
+//         if range.start == current_end {
+//             current_end = range.end;
+//         } else {
+//             bail!("Range has some hole.")
+//         }
+//     }
 
-    log::trace!("IPv4 will be reassembled in range: 0..{current_end}");
-    Ok(current_end)
-}
+//     Ok(current_end)
+// }
 
 /* ======== */
 

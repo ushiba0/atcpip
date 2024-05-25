@@ -3,10 +3,13 @@ use clap::{Parser, Subcommand};
 use std::net::Ipv4Addr;
 
 mod arping;
+mod common;
 mod pingcmd;
+mod udp_netcat;
 
 mod layer2;
 mod layer3;
+mod layer4;
 
 #[derive(Debug, Parser)]
 struct CommandArguments {
@@ -37,6 +40,10 @@ enum SecondCommand {
     Server,
     /// TCP Client.
     Client,
+    /// UDP Server.
+    UdpServer,
+    /// UDP Client.
+    UdpClient,
 }
 
 #[derive(Debug, Parser)]
@@ -104,6 +111,8 @@ async fn main() -> anyhow::Result<()> {
                 Ok(())
             })
         }
+        SecondCommand::UdpClient => tokio::spawn(async { Ok(()) }),
+        SecondCommand::UdpServer => tokio::spawn(async move { crate::udp_netcat::main().await }),
         _ => unimplemented!(),
     };
 
@@ -132,17 +141,4 @@ async fn main() -> anyhow::Result<()> {
             Err(anyhow::anyhow!("{err:?}"))
         }
     }
-}
-
-#[macro_export]
-macro_rules! unwrap_or_yield {
-    ($global_var:expr, $method:ident) => {
-        loop {
-            let a = $global_var.lock().await;
-            match a.as_ref() {
-                Some(value) => break value.$method(),
-                None => tokio::task::yield_now().await,
-            }
-        }
-    };
 }
