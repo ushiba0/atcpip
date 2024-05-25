@@ -1,6 +1,7 @@
 use std::net::Ipv4Addr;
 
-use bytes::Bytes;
+use anyhow::Result;
+use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::FromPrimitive;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::Receiver;
@@ -8,8 +9,6 @@ use tokio::sync::mpsc::Receiver;
 use crate::layer2::arp::Arp;
 use crate::layer2::interface::{DEFAULT_GATEWAY, MY_IP_ADDRESS, MY_MAC_ADDRESS, SUBNET_MASK};
 use crate::layer3::ipv4::Ipv4Frame;
-
-const ETHERNET_FRAME_SIZE: usize = 1500;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u16)]
@@ -29,86 +28,54 @@ pub struct EthernetHeader {
 
 #[derive(Default, Clone, Debug)]
 pub struct EthernetFrame {
-    pub destination_mac_address: [u8; 6],
-    pub source_mac_address: [u8; 6],
-    pub ethernet_type: u16,
-
     pub header: EthernetHeader,
     pub payload: Bytes,
 }
 
 impl EthernetHeader {
-    pub fn new(buf: &[u8; 14]) -> Self {
-        let mut destination_mac_address = [0u8; 6];
-        let mut source_mac_address = [0u8; 6];
-        let ethernet_type = u16::from_be_bytes(buf[12..14].try_into().unwrap());
-
-        destination_mac_address.copy_from_slice(&buf[0..6]);
-        source_mac_address.copy_from_slice(&buf[6..12]);
-
+    fn from_bytes(bytes: &[u8; 14] ) -> Self {
         Self {
-            destination_mac_address,
-            source_mac_address,
-            ethernet_type,
+            destination_mac_address: bytes[0..6].try_into().unwrap(),
+            source_mac_address: bytes[6..12].try_into().unwrap(),
+            ethernet_type: u16::from_be_bytes(bytes[12..14].try_into().unwrap())
         }
     }
 
-    fn to_bin(&self) -> Vec<u8> {
-        let mut bin: Vec<u8> = Vec::new();
-        bin.extend_from_slice(&self.destination_mac_address);
-        bin.extend_from_slice(&self.source_mac_address);
-        bin.extend_from_slice(&self.ethernet_type.to_be_bytes());
-        bin
+    fn to_bytes(&self) -> Bytes {
+        let mut bytes = BytesMut::zeroed(200);
+        bytes[0..6].copy_from_slice(&self.destination_mac_address);
+        bytes[6..12].copy_from_slice(&self.source_mac_address);
+        bytes.put_u16(self.ethernet_type);
+        bytes.freeze()
     }
-
-    // pub fn is_broadcast(&self) -> bool {
-    //     self.destination_mac_address == [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]
-    // }
 }
 
 impl EthernetFrame {
-    pub fn new(buf: &[u8]) -> Self {
-        let header_bytes = &buf[0..14];
-        let header = EthernetHeader::new(header_bytes.try_into().unwrap());
-        // let payload = buf[14..].to_vec();
-        let payload = Bytes::copy_from_slice(&buf[14..]);
-        debug_assert!(payload.len() <= ETHERNET_FRAME_SIZE);
-
-        Self {
-            header,
-            payload,
-            ..Default::default()
-        }
-    }
-
     pub fn from_bytes(buf: &[u8]) -> Self {
         Self {
-            destination_mac_address: buf[0..6].try_into().unwrap(),
-            source_mac_address: buf[6..12].try_into().unwrap(),
-            ethernet_type: u16::from_be_bytes(buf[12..14].try_into().unwrap()),
+            header: EthernetHeader::from_bytes(&buf[0..14].try_into().unwrap()),
             payload: Bytes::copy_from_slice(&buf[14..]),
-            ..Default::default()
         }
     }
 
-    pub fn build_to_packet(&self) -> Vec<u8> {
-        let mut packet: Vec<u8> = Vec::new();
-        packet.extend_from_slice(&self.header.to_bin());
-        packet.extend_from_slice(&self.payload);
-        packet
+    pub fn build_to_packet(&self) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.put(self.header.to_bytes());
+        bytes.put(self.payload.clone());
+        bytes.freeze()
     }
 
-    pub fn to_arp(&self) -> anyhow::Result<Arp> {
+    pub fn to_arp(&self) -> Result<Arp> {
         Arp::from_eth_header_and_payload(&self.header, &self.payload)
     }
 
-    pub async fn send(&self) -> anyhow::Result<usize> {
+    pub async fn send(&self) -> Result<usize> {
         let f = self.clone();
         f.validate_mtu()?;
         send_ethernet_frame(f).await
     }
 
-    fn validate_mtu(&self) -> anyhow::Result<()> {
+    fn validate_mtu(&self) -> Result<()> {
         anyhow::ensure!(
             self.payload.len() <= super::interface::MTU,
             "Ethernet payload ({}) exceeds MTU.",
@@ -118,7 +85,7 @@ impl EthernetFrame {
     }
 }
 
-pub async fn send_ethernet_frame(ethernet_frame: EthernetFrame) -> anyhow::Result<usize> {
+pub async fn send_ethernet_frame(ethernet_frame: EthernetFrame) -> Result<usize> {
     crate::layer2::interface::send_to_pnet(ethernet_frame).await
 }
 
@@ -130,7 +97,7 @@ fn is_same_subnet(dest_ip: Ipv4Addr) -> bool {
 }
 
 // Default gateway に振るか、同一サブネットかを判断する.
-async fn generate_ethernet_header(dest_ip: Ipv4Addr) -> anyhow::Result<EthernetHeader> {
+async fn generate_ethernet_header(dest_ip: Ipv4Addr) -> Result<EthernetHeader> {
     let destination_mac_address = if is_same_subnet(dest_ip) {
         // dest_ip を ARP 解決して MAC を返す。
         crate::layer2::arp::resolve_arp(dest_ip.octets()).await?
@@ -148,7 +115,7 @@ async fn generate_ethernet_header(dest_ip: Ipv4Addr) -> anyhow::Result<EthernetH
 // 設計思想:
 // 1 つ上にどんなレイヤがあるかは知っておく必要がある。
 // 下にどんなレイヤがあるかは全く知る必要がない。
-pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> anyhow::Result<usize> {
+pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> Result<usize> {
     let destination_ip = ipv4_frame.get_destination_address();
     let eth_header = generate_ethernet_header(destination_ip).await?;
 

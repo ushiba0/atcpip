@@ -98,7 +98,7 @@ async fn datalink_rx_handler(
         // rx.next() はパケットが届かない場合は PNET_RX_TIMEOUT_MICROSEC ms で timeout する。
         // 逆にここで PNET_RX_TIMEOUT_MICROSEC ms のブロックが発生する可能性がある。
         if let Ok(buf) = rx.next() {
-            let eth_frame = EthernetFrame::new(buf);
+            let eth_frame = EthernetFrame::from_bytes(buf);
             eth_sender.send(eth_frame).await?;
         }else {
             // Timed out.
