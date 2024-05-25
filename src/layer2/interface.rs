@@ -1,13 +1,13 @@
-use anyhow::Context;
+use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use pnet::datalink::{Config, DataLinkReceiver, DataLinkSender};
-use num_traits::FromPrimitive;
 
 use tokio::sync::broadcast;
+use tokio::sync::broadcast::Receiver;
+use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
-use crate::layer2::ethernet::{EtherType, EthernetFrame};
-use crate::layer3::ipv4::Ipv4Frame;
+use crate::layer2::ethernet::EthernetFrame;
 
 pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
@@ -21,7 +21,7 @@ static SEND_HANDLE: Lazy<Mutex<Option<tokio::sync::broadcast::Sender<EthernetFra
 
 const BUFFER_SIZE_DATALINK_SEND_CHANNEL: usize = 100;
 
-async fn get_channel() -> anyhow::Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
+async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
     let interfaces = pnet::datalink::interfaces();
     log::trace!("Network interfaces on this host: {:?}", interfaces);
 
@@ -50,7 +50,7 @@ async fn get_channel() -> anyhow::Result<(Box<dyn DataLinkSender>, Box<dyn DataL
     Ok((tx, rx))
 }
 
-pub async fn send_to_pnet(ethernet_frame: EthernetFrame) -> anyhow::Result<usize> {
+pub async fn send_to_pnet(ethernet_frame: EthernetFrame) -> Result<usize> {
     SEND_HANDLE
         .lock()
         .await
@@ -62,80 +62,70 @@ pub async fn send_to_pnet(ethernet_frame: EthernetFrame) -> anyhow::Result<usize
             ethernet_frame.header,
             ethernet_frame.payload.len()
         ))
-    // .context("[send_to_pnet] Send to pnet tx error.")
 }
 
 pub async fn spawn_tx_handler() {
-    let (iface_send, mut iface_recv) =
+    let (iface_send, iface_recv) =
         broadcast::channel::<EthernetFrame>(BUFFER_SIZE_DATALINK_SEND_CHANNEL);
-    let (mut tx, mut rx) = get_channel().await.unwrap();
+    let (tx, rx) = get_channel().await.unwrap();
 
     *SEND_HANDLE.lock().await = Some(iface_send);
 
-    // Datalink Rx.
+    let (eth_rx_sender, eth_rx_receiver) = mpsc::channel::<super::ethernet::EthernetFrame>(2);
+    // Spawn esthernet handler.
     tokio::spawn(async move {
-        log::info!("Spawned Datalink Rx handler.");
-
-        // ARP ハンドラスレッドを spawn し、 ARP ハンドラスレッドに通知する用の Sender を返す。
-        let arp_rx_sender = {
-            use crate::layer2::arp::{arp_handler, Arp};
-            // ARP packet が来たら、この channel で上のレイヤに通知する。
-            let (arp_rx_sender, arp_rx_receiver) = broadcast::channel::<Arp>(2);
-
-            // Spawn ARP handler.
-            tokio::spawn(async move {
-                arp_handler(arp_rx_receiver).await;
-            });
-            arp_rx_sender
-        };
-
-        // IPv4 ハンドラスレッドを spawn し、 IPv4 ハンドラスレッドに通知する用の Sender を返す。
-        let ipv4_rx_sender = {
-            // Ipv4 の受信を上のレイヤに伝えるチャネル.
-            let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<Ipv4Frame>(2);
-
-            // Spawn IPv4 handler.
-            tokio::spawn(async move {
-                crate::layer3::ipv4::ipv4_handler(ipv4_rx_receiver).await;
-            });
-            ipv4_rx_sender
-        };
-
-        loop {
-            tokio::task::yield_now().await;
-            // rx.next() はパケットが届かない場合は PNET_RX_TIMEOUT_MICROSEC ms で timeout する。
-            // 逆にここで PNET_RX_TIMEOUT_MICROSEC ms のブロックが発生する可能性がある。
-            if let Ok(buf) = rx.next() {
-                let eth_frame = EthernetFrame::new(buf);
-
-                // EtherType を見て Arp handler, IPv4 handler に渡す。
-                match EtherType::from_u16(eth_frame.header.ethernet_type).unwrap_or_default() {
-                    EtherType::Arp => {
-                        let arp = eth_frame.to_arp().unwrap();
-                        arp_rx_sender.send(arp).unwrap();
-                    }
-                    EtherType::Ipv4 => {
-                        let ipv4frame = Ipv4Frame::from_buffer(&eth_frame.payload);
-                        // Send to ipv4_handler() at crate::layer3::ipv4.
-                        ipv4_rx_sender.send(ipv4frame).unwrap();
-                    }
-                    _ => {}
-                }
-            }
-        }
+        super::ethernet::ethernet_handler(eth_rx_receiver).await;
     });
 
-    // Datalink Tx.
+    // Spawn datalink Rx handler.
     tokio::spawn(async move {
-        log::info!("Spawned Datalink Tx handler.");
-        loop {
-            match iface_recv.recv().await {
-                Ok(eth_frame) => {
-                    let packet = eth_frame.build_to_packet();
-                    tx.send_to(&packet, None);
+        datalink_rx_handler(rx, eth_rx_sender).await.unwrap();
+    });
+
+    // Spawn datalink Tx handler.
+    tokio::spawn(async move {
+        datalink_tx_handler(tx, iface_recv).await.unwrap();
+    });
+}
+
+async fn datalink_rx_handler(
+    mut rx: Box<dyn DataLinkReceiver>,
+    eth_sender: mpsc::Sender<EthernetFrame>,
+) -> Result<()> {
+    log::info!("Spawned Datalink Rx handler.");
+    loop {
+        tokio::task::yield_now().await;
+        // rx.next() はパケットが届かない場合は PNET_RX_TIMEOUT_MICROSEC ms で timeout する。
+        // 逆にここで PNET_RX_TIMEOUT_MICROSEC ms のブロックが発生する可能性がある。
+        if let Ok(buf) = rx.next() {
+            let eth_frame = EthernetFrame::new(buf);
+            eth_sender.send(eth_frame).await?;
+        }else {
+            // Timed out.
+        }
+    }
+}
+
+async fn datalink_tx_handler(
+    mut tx: Box<dyn DataLinkSender>,
+    mut iface_recv: Receiver<EthernetFrame>,
+) -> Result<()> {
+    log::info!("Spawned Datalink Tx handler.");
+    loop {
+        let eth_frame = iface_recv.recv().await?;
+        let bytes = eth_frame.build_to_packet();
+        let res = tx.send_to(&bytes, None)
+            .context("DataLinkSender returned None.");
+        match res {
+            Ok(v) => match v {
+                Ok(_) => {}
+                Err(e) => {
+                    log::error!("[datalink_tx_handler] {e:?}");
                 }
-                Err(e) => log::error!("Datalink Tx handler error {e:?}"),
+            },
+            Err(e) => {
+                log::error!("[datalink_tx_handler] {e:?}");
             }
         }
-    });
+    }
 }

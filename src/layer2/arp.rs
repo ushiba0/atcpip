@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -84,7 +85,8 @@ impl Arp {
 
         EthernetFrame {
             header: self.ethernet_header.clone(),
-            payload,
+            payload: Bytes::copy_from_slice(&payload),
+            ..Default::default()
         }
     }
 
