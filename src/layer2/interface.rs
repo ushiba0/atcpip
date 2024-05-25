@@ -1,6 +1,7 @@
 use anyhow::Context;
 use once_cell::sync::Lazy;
 use pnet::datalink::{Config, DataLinkReceiver, DataLinkSender};
+use num_traits::FromPrimitive;
 
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
@@ -108,7 +109,7 @@ pub async fn spawn_tx_handler() {
                 let eth_frame = EthernetFrame::new(buf);
 
                 // EtherType を見て Arp handler, IPv4 handler に渡す。
-                match EtherType::from_u16(eth_frame.header.ethernet_type) {
+                match EtherType::from_u16(eth_frame.header.ethernet_type).unwrap_or_default() {
                     EtherType::Arp => {
                         let arp = eth_frame.to_arp().unwrap();
                         arp_rx_sender.send(arp).unwrap();

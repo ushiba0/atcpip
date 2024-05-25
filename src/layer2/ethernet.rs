@@ -1,31 +1,17 @@
-const ETHERNET_FRAME_SIZE: usize = 1500;
+use std::net::Ipv4Addr;
 
 use crate::layer2::arp::Arp;
 use crate::layer2::interface::{DEFAULT_GATEWAY, MY_IP_ADDRESS, MY_MAC_ADDRESS, SUBNET_MASK};
 
-#[derive(Debug, Default, PartialEq, Clone, Copy)]
+const ETHERNET_FRAME_SIZE: usize = 1500;
+
+#[derive(Debug, Default, PartialEq, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u16)]
 pub enum EtherType {
     #[default]
     Empty = 0x0000u16,
     Ipv4 = 0x0800,
     Arp = 0x0806,
-}
-
-impl EtherType {
-    pub fn from_u16(x: u16) -> Self {
-        let x = x as isize;
-        match x {
-            0x0000isize => Self::Empty,
-            0x0800isize => Self::Ipv4,
-            0x0806isize => Self::Arp,
-            _ => Self::Empty,
-        }
-    }
-
-    pub fn as_u16(self) -> u16 {
-        self as u16
-    }
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -115,18 +101,18 @@ pub async fn send_ethernet_frame(ethernet_frame: EthernetFrame) -> anyhow::Resul
     crate::layer2::interface::send_to_pnet(ethernet_frame).await
 }
 
-fn is_same_subnet(dest_ip: [u8; 4]) -> bool {
+fn is_same_subnet(dest_ip: Ipv4Addr) -> bool {
     let subnet_mask = u32::from_be_bytes(SUBNET_MASK);
     let my_nw_u32 = u32::from_be_bytes(MY_IP_ADDRESS) & subnet_mask;
-    let dest_nw_u32 = u32::from_be_bytes(dest_ip) & subnet_mask;
+    let dest_nw_u32 = u32::from_be_bytes(dest_ip.octets()) & subnet_mask;
     my_nw_u32 == dest_nw_u32
 }
 
-// Default gateway に振るか、同一サブネット化を判断する.
-async fn generate_ethernet_header(dest_ip: [u8; 4]) -> anyhow::Result<EthernetHeader> {
+// Default gateway に振るか、同一サブネットかを判断する.
+async fn generate_ethernet_header(dest_ip: Ipv4Addr) -> anyhow::Result<EthernetHeader> {
     let destination_mac_address = if is_same_subnet(dest_ip) {
         // dest_ip を ARP 解決して MAC を返す。
-        crate::layer2::arp::resolve_arp(dest_ip).await?
+        crate::layer2::arp::resolve_arp(dest_ip.octets()).await?
     } else {
         // Default gateway をARP 解決する。
         crate::layer2::arp::resolve_arp(DEFAULT_GATEWAY).await?
@@ -134,7 +120,7 @@ async fn generate_ethernet_header(dest_ip: [u8; 4]) -> anyhow::Result<EthernetHe
     Ok(EthernetHeader {
         destination_mac_address,
         source_mac_address: crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone),
-        ethernet_type: EtherType::Ipv4.as_u16(),
+        ethernet_type: EtherType::Ipv4 as u16,
     })
 }
 
@@ -142,7 +128,7 @@ async fn generate_ethernet_header(dest_ip: [u8; 4]) -> anyhow::Result<EthernetHe
 // 1 つ上にどんなレイヤがあるかは知っておく必要がある。
 // 下にどんなレイヤがあるかは全く知る必要がない。
 pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> anyhow::Result<usize> {
-    let destination_ip = ipv4_frame.destination_address;
+    let destination_ip = ipv4_frame.get_destination_address();
     let eth_header = generate_ethernet_header(destination_ip).await?;
 
     let ether_frame = EthernetFrame {

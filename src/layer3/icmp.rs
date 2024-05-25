@@ -111,13 +111,13 @@ async fn send_icmp_echo_reply(
         .set_payload(&icmp_echo_request.data);
 
     echo_reply
-        .to_ipv4(ipv4_frame.source_address)?
+        .to_ipv4(ipv4_frame.get_source_address().octets())?
         .safely_send()
         .await?;
 
     log::trace!(
-        "Sent an ICMP Echo Reply to IP {:?}. ICMP data size: {}.",
-        ipv4_frame.source_address,
+        "Sent an ICMP Echo Reply to IP {}. ICMP data size: {}.",
+        ipv4_frame.get_source_address(),
         icmp_echo_request.data.len()
     );
     Ok(())

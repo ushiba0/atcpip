@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::ops::Range;
 
-use anyhow::{bail, Context};
 use bit_field::BitField;
 use bytes::{Bytes, BytesMut};
 use num_traits::FromPrimitive;
@@ -36,6 +34,7 @@ pub enum Ipv4Protcol {
 // length, identification, checksum なども計算済みである。
 #[derive(Default, Debug, Clone)]
 pub struct Ipv4Frame {
+    // IPv4 Header.
     pub version_and_header_length: u8, // Default: 0b0100_0101
     pub differenciate_service_field: u8,
     pub total_length: u16,
@@ -43,14 +42,13 @@ pub struct Ipv4Frame {
     // 上位 1 bit: reserved
     //      2 bit: DF 0 = May Fragment, 1 = Don't Fragment.
     //      3 bit: MF 0 = Last Fragment, 1 = More Fragments.
-    pub flags: u16, // Default: 0.
-    pub time_to_live: u8,
-    pub protocol: u8,
+    flags: u16,
+    time_to_live: u8,
+    protocol: u8,
     _header_checksum: u16,
-    pub source_address: [u8; 4],
-    pub destination_address: [u8; 4],
-
-    // pub header: Ipv4Header,
+    source_address: [u8; 4],
+    destination_address: [u8; 4],
+    // IPv4 Payload.
     pub payload: Bytes,
 }
 
@@ -184,6 +182,16 @@ impl Ipv4Frame {
         self.total_length = (IPV4_HEADER_LEN + self.payload.len()) as u16;
         self
     }
+
+    pub fn get_source_address(&self) -> std::net::Ipv4Addr {
+        let ip = self.source_address;
+        std::net::Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])
+    }
+
+    pub fn get_destination_address(&self) -> std::net::Ipv4Addr {
+        let ip = self.destination_address;
+        std::net::Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])
+    }
 }
 
 static IPV4_RECEIVER: Lazy<Mutex<Option<Receiver<Ipv4Frame>>>> = Lazy::new(Default::default);
@@ -248,70 +256,6 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
         }
     }
 }
-
-// fn ipv4_rebuild_fragment(
-//     tmp_pool: &mut HashMap<u16, Vec<Ipv4Frame>>,
-//     ipv4_frame: &Ipv4Frame,
-// ) -> anyhow::Result<Ipv4Frame> {
-//     tmp_pool
-//         .entry(ipv4_frame.identification)
-//         .and_modify(|val| {
-//             val.push(ipv4_frame.clone());
-//         })
-//         .or_insert(vec![ipv4_frame.clone()]);
-
-//     // MF==true のパケットの場合は return する。
-//     // 現在の実装では MF==false のパケットが来ない限り rebuild しない。
-//     if ipv4_frame.get_fragment_mf_bit() {
-//         bail!("MF==true なのでリアセンブルしない。");
-//     }
-
-//     // MF==false のパケットを受け取ったら即 pool から廃棄する。
-//     let packets = tmp_pool
-//         .remove(&ipv4_frame.identification)
-//         .context("No packtes.")?;
-
-//     let mut fragment_range_list: Vec<Range<usize>> = Vec::new();
-//     let mut concatenated_payload = BytesMut::zeroed(IPV4_MAX_PAYLOAD_SIZE);
-
-//     for packet in packets.iter() {
-//         let data_size = packet.total_length as usize - IPV4_HEADER_LEN;
-//         let data_offset = packet.get_fragment_offset() as usize;
-//         let range = data_offset..(data_offset + data_size);
-//         fragment_range_list.push(range.clone());
-//         concatenated_payload[range].copy_from_slice(&packet.payload[..data_size]);
-//     }
-
-//     let merged_range = concatenate_ranges(&fragment_range_list)?;
-//     let reassembled_payload = &concatenated_payload[0..merged_range];
-//     let reassembled_packet = ipv4_frame.clone().set_payload(reassembled_payload);
-//     Ok(reassembled_packet)
-// }
-
-// // Range を結合し、そのサイズを返す。
-// // Range に Hole や被りがあると Err を返す。
-// fn concatenate_ranges(ranges: &[Range<usize>]) -> anyhow::Result<usize> {
-//     // ranges を start でソート。
-//     let mut sorted_ranges = ranges.to_owned();
-//     sorted_ranges.sort_by_key(|r| r.start);
-
-//     if sorted_ranges.first().context("Empty.")?.start != 0 {
-//         bail!("Range start is not 0.");
-//     }
-
-//     let mut current_end = 0;
-//     for range in ranges.iter() {
-//         if range.start == current_end {
-//             current_end = range.end;
-//         } else {
-//             bail!("Range has some hole.")
-//         }
-//     }
-
-//     Ok(current_end)
-// }
-
-/* ======== */
 
 #[derive(Default, Debug, Clone)]
 pub struct Ipv4FrameUnchecked {
@@ -391,6 +335,7 @@ impl Ipv4FrameUnchecked {
 
             let last_index = ips.len() - 1;
             ips[last_index] = ips[last_index].clone().set_fragment_mf_bit(false);
+            debug_assert!(!ips.last().unwrap().get_fragment_mf_bit());
 
             ips
         }

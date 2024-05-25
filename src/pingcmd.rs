@@ -82,7 +82,7 @@ async fn icmp_echo_reply_listener_with_timeout(
             let ipv4frame = icmp_notifier_receiver.recv().await.unwrap();
             let icmp = Icmp::from_buffer(&ipv4frame.payload);
             if icmp.icmp_type == IcmpType::Reply as u8
-                && ipv4frame.source_address == ip
+                && ipv4frame.get_source_address().octets() == ip
                 && icmp.identifier == identifier
                 && icmp.sequence_number == seqence_number
             {

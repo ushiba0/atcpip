@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
 
 use anyhow::{ensure, Context};
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use once_cell::sync::Lazy;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
@@ -19,13 +20,13 @@ pub struct UdpPacket {
 
 #[derive(Debug)]
 pub struct UdpSocket {
-    receiver: Receiver<([u8; 4], Bytes)>,
+    receiver: Receiver<(Ipv4Addr, Bytes)>,
 }
 
 impl UdpPacket {
-    pub fn new() -> Self {
-        Default::default()
-    }
+    // pub fn new() -> Self {
+    //     Default::default()
+    // }
 
     pub fn from_bytes(bytes: &Bytes) -> Self {
         Self {
@@ -40,15 +41,15 @@ impl UdpPacket {
 
 // 下位のレイヤから UDP パケットが来たら、この Hashmap の Sender で送る。
 // Listen しているユーザーアプリケーションは Receiver で受け取る。
-pub static LISTEN_ADDRESSES: Lazy<Mutex<HashMap<u16, Sender<([u8; 4], Bytes)>>>> =
+pub static LISTEN_ADDRESSES: Lazy<Mutex<HashMap<u16, Sender<(Ipv4Addr, Bytes)>>>> =
     Lazy::new(Default::default);
 
 impl UdpSocket {
-    pub async fn bind(ip: [u8; 4], port: u16) -> anyhow::Result<Self> {
+    pub async fn bind(_ip: Ipv4Addr, port: u16) -> anyhow::Result<Self> {
         let mut portlist = LISTEN_ADDRESSES.lock().await;
         ensure!(portlist.get(&port).is_none(), "Address already in use.");
 
-        let (rx_sender, rx_receiver) = mpsc::channel::<([u8; 4], Bytes)>(2);
+        let (rx_sender, rx_receiver) = mpsc::channel::<(Ipv4Addr, Bytes)>(2);
         portlist.insert(port, rx_sender);
 
         log::info!("Listening UDP on port {port}.");
@@ -57,7 +58,7 @@ impl UdpSocket {
         })
     }
 
-    pub async fn recv_from(&mut self) -> ([u8; 4], Bytes) {
+    pub async fn recv_from(&mut self) -> (Ipv4Addr, Bytes) {
         self.receiver.recv().await.unwrap()
     }
 }
@@ -65,13 +66,13 @@ impl UdpSocket {
 pub async fn udp_handler(mut receiver: Receiver<Ipv4Frame>) -> anyhow::Result<()> {
     loop {
         let ipv4_frame = receiver.recv().await.context("closed")?;
-        let source_ip = ipv4_frame.source_address;
+        let source_ip = ipv4_frame.get_source_address();
         let udp_packet = UdpPacket::from_bytes(&ipv4_frame.payload);
 
         // Todo: Checksum の計算
 
-        if let Some(a) = LISTEN_ADDRESSES.lock().await.get(&udp_packet.target_port) {
-            a.send((source_ip, udp_packet.payload)).await.unwrap();
+        if let Some(s) = LISTEN_ADDRESSES.lock().await.get(&udp_packet.target_port) {
+            s.send((source_ip, udp_packet.payload)).await.unwrap();
         }
     }
 }

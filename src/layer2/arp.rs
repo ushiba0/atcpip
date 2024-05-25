@@ -55,7 +55,7 @@ impl Arp {
 
     pub fn request_minimal() -> Self {
         let ethernet_header: EthernetHeader = EthernetHeader {
-            ethernet_type: EtherType::Arp.as_u16(),
+            ethernet_type: EtherType::Arp as u16,
             ..Default::default()
         };
         Self {
