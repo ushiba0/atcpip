@@ -7,9 +7,7 @@ use parking_lot::RwLock;
 use pnet::datalink::{Config, DataLinkReceiver, DataLinkSender};
 
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
-use tokio::sync::Mutex;
 
 use crate::layer2::ethernet::EthernetFrame;
 
@@ -24,15 +22,16 @@ pub static MY_MAC_ADDRESS: Lazy<[u8; 6]> = Lazy::new(|| {
     mac
 });
 
-static SEND_HANDLE: Lazy<Mutex<Option<broadcast::Sender<EthernetFrame>>>> =
-    Lazy::new(|| Mutex::new(None));
-
-// static SEND_HANDLE2: Lazy<parking_lot::RwLock<(broadcast::Sender<EthernetFrame>, broadcast::Receiver<EthernetFrame>)>> =
-//     Lazy::new(|| {
-//          let (iface_send, iface_recv) =
-//         broadcast::channel::<EthernetFrame>(BUFFER_SIZE_DATALINK_SEND_CHANNEL);
-//         RwLock::new((iface_send, iface_recv))
-//     });
+static SEND_HANDLE2: Lazy<
+    parking_lot::RwLock<(
+        broadcast::Sender<EthernetFrame>,
+        broadcast::Receiver<EthernetFrame>,
+    )>,
+> = Lazy::new(|| {
+    let (iface_send, iface_recv) =
+        broadcast::channel::<EthernetFrame>(BUFFER_SIZE_DATALINK_SEND_CHANNEL);
+    RwLock::new((iface_send, iface_recv))
+});
 
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
 pub const DEFAULT_GATEWAY_IPV4: Ipv4Addr = Ipv4Addr::new(192, 168, 1, 1);
@@ -75,30 +74,16 @@ async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkRecei
 }
 
 pub async fn send_to_pnet(ethernet_frame: EthernetFrame) -> Result<usize> {
-    SEND_HANDLE
-        .lock()
-        .await
-        .as_ref()
-        .unwrap()
+    SEND_HANDLE2
+        .read()
+        .borrow()
+        .0
         .send(ethernet_frame.clone())
-        .context(format!(
-            "[send_to_pnet] Send to pnet tx error. {:?}, payload size: {}",
-            ethernet_frame.header,
-            ethernet_frame.payload.len()
-        ))
-    // SEND_HANDLE2.read().borrow().0.send(ethernet_frame.clone()).context("eror")
+        .context("error")
 }
 
 pub async fn spawn_tx_handler() {
-    let (iface_send, iface_recv) =
-        broadcast::channel::<EthernetFrame>(BUFFER_SIZE_DATALINK_SEND_CHANNEL);
     let (tx, rx) = get_channel().await.unwrap();
-
-    *SEND_HANDLE.lock().await = Some(iface_send);
-
-    // let iface_recv = {
-    //     SEND_HANDLE2.read().borrow().1.resubscribe()
-    // };
 
     let (eth_rx_sender, eth_rx_receiver) =
         mpsc::channel::<EthernetFrame>(BUFFER_SIZE_ETH_SEND_CHANNEL);
@@ -114,7 +99,7 @@ pub async fn spawn_tx_handler() {
 
     // Spawn datalink Tx handler.
     tokio::spawn(async move {
-        datalink_tx_handler(tx, iface_recv).await.unwrap();
+        datalink_tx_handler(tx).await.unwrap();
     });
 }
 
@@ -137,13 +122,18 @@ async fn datalink_rx_handler(
     }
 }
 
-async fn datalink_tx_handler(
-    mut tx: Box<dyn DataLinkSender>,
-    mut iface_recv: Receiver<EthernetFrame>,
-) -> Result<()> {
+async fn datalink_tx_handler(mut tx: Box<dyn DataLinkSender>) -> Result<()> {
     log::info!("Spawned Datalink Tx handler.");
+    let mut iface_recv = SEND_HANDLE2.read().borrow().1.resubscribe();
+
     loop {
-        let eth_frame = iface_recv.recv().await?;
+        let eth_frame = match iface_recv.recv().await {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("[datalink_tx_handler] {e:?}");
+                continue;
+            }
+        };
         let bytes = eth_frame.build_to_packet();
         let res = tx.send_to(&bytes, None).context("None.");
         match res {
