@@ -1,7 +1,9 @@
+use std::borrow::Borrow;
 use std::net::Ipv4Addr;
 
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use pnet::datalink::{Config, DataLinkReceiver, DataLinkSender};
 
 use tokio::sync::broadcast;
@@ -15,12 +17,22 @@ pub static MY_MAC_ADDRESS: Lazy<[u8; 6]> = Lazy::new(|| {
     let interfaces = pnet::datalink::interfaces();
     let interface = interfaces
         .into_iter()
-        .find(|e| e.name == crate::layer2::interface::INTERFACE_NAME)
+        .find(|e| e.name == INTERFACE_NAME)
         .unwrap();
     let mac = interface.mac.unwrap().octets();
     log::info!("Initialized MAC ADDRESS {mac:x?}.");
     mac
 });
+
+static SEND_HANDLE: Lazy<Mutex<Option<broadcast::Sender<EthernetFrame>>>> =
+    Lazy::new(|| Mutex::new(None));
+
+// static SEND_HANDLE2: Lazy<parking_lot::RwLock<(broadcast::Sender<EthernetFrame>, broadcast::Receiver<EthernetFrame>)>> =
+//     Lazy::new(|| {
+//          let (iface_send, iface_recv) =
+//         broadcast::channel::<EthernetFrame>(BUFFER_SIZE_DATALINK_SEND_CHANNEL);
+//         RwLock::new((iface_send, iface_recv))
+//     });
 
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
 pub const DEFAULT_GATEWAY_IPV4: Ipv4Addr = Ipv4Addr::new(192, 168, 1, 1);
@@ -29,8 +41,6 @@ pub const MTU: usize = 1500;
 pub const INTERFACE_NAME: &str = "ens192";
 const PNET_TX_TIMEOUT_MICROSEC: u64 = 1000 * 10; // 10 ms.
 const PNET_RX_TIMEOUT_MICROSEC: u64 = 1000; // 1 ms
-static SEND_HANDLE: Lazy<Mutex<Option<tokio::sync::broadcast::Sender<EthernetFrame>>>> =
-    Lazy::new(|| Mutex::new(None));
 
 const BUFFER_SIZE_DATALINK_SEND_CHANNEL: usize = 8;
 const BUFFER_SIZE_ETH_SEND_CHANNEL: usize = 2;
@@ -76,6 +86,7 @@ pub async fn send_to_pnet(ethernet_frame: EthernetFrame) -> Result<usize> {
             ethernet_frame.header,
             ethernet_frame.payload.len()
         ))
+    // SEND_HANDLE2.read().borrow().0.send(ethernet_frame.clone()).context("eror")
 }
 
 pub async fn spawn_tx_handler() {
@@ -84,6 +95,10 @@ pub async fn spawn_tx_handler() {
     let (tx, rx) = get_channel().await.unwrap();
 
     *SEND_HANDLE.lock().await = Some(iface_send);
+
+    // let iface_recv = {
+    //     SEND_HANDLE2.read().borrow().1.resubscribe()
+    // };
 
     let (eth_rx_sender, eth_rx_receiver) =
         mpsc::channel::<EthernetFrame>(BUFFER_SIZE_ETH_SEND_CHANNEL);
@@ -109,7 +124,6 @@ async fn datalink_rx_handler(
 ) -> Result<()> {
     log::info!("Spawned Datalink Rx handler.");
     loop {
-        tokio::task::yield_now().await;
         // rx.next() はパケットが届かない場合は PNET_RX_TIMEOUT_MICROSEC ms で timeout する。
         // 逆にここで PNET_RX_TIMEOUT_MICROSEC ms のブロックが発生する可能性がある。
         if let Ok(buf) = rx.next() {
@@ -129,19 +143,13 @@ async fn datalink_tx_handler(
     loop {
         let eth_frame = iface_recv.recv().await?;
         let bytes = eth_frame.build_to_packet();
-        let res = tx
-            .send_to(&bytes, None)
-            .context("DataLinkSender returned None.");
+        let res = tx.send_to(&bytes, None).context("None.");
         match res {
             Ok(v) => match v {
                 Ok(_) => {}
-                Err(e) => {
-                    log::error!("[datalink_tx_handler] {e:?}");
-                }
+                Err(e) => log::error!("[datalink_tx_handler] {e:?}"),
             },
-            Err(e) => {
-                log::error!("[datalink_tx_handler] {e:?}");
-            }
+            Err(e) => log::error!("[datalink_tx_handler] {e:?}"),
         }
     }
 }
