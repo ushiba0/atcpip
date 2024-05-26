@@ -72,7 +72,8 @@ pub async fn spawn_tx_handler() {
 
     *SEND_HANDLE.lock().await = Some(iface_send);
 
-    let (eth_rx_sender, eth_rx_receiver) = mpsc::channel::<EthernetFrame>(BUFFER_SIZE_ETH_SEND_CHANNEL);
+    let (eth_rx_sender, eth_rx_receiver) =
+        mpsc::channel::<EthernetFrame>(BUFFER_SIZE_ETH_SEND_CHANNEL);
     // Spawn esthernet handler.
     tokio::spawn(async move {
         super::ethernet::ethernet_handler(eth_rx_receiver).await;
@@ -99,9 +100,9 @@ async fn datalink_rx_handler(
         // rx.next() はパケットが届かない場合は PNET_RX_TIMEOUT_MICROSEC ms で timeout する。
         // 逆にここで PNET_RX_TIMEOUT_MICROSEC ms のブロックが発生する可能性がある。
         if let Ok(buf) = rx.next() {
-            let eth_frame = EthernetFrame::from_bytes(buf);
+            let eth_frame = EthernetFrame::from_slice(buf);
             eth_sender.send(eth_frame).await?;
-        }else {
+        } else {
             // Timed out.
         }
     }
@@ -115,7 +116,8 @@ async fn datalink_tx_handler(
     loop {
         let eth_frame = iface_recv.recv().await?;
         let bytes = eth_frame.build_to_packet();
-        let res = tx.send_to(&bytes, None)
+        let res = tx
+            .send_to(&bytes, None)
             .context("DataLinkSender returned None.");
         match res {
             Ok(v) => match v {

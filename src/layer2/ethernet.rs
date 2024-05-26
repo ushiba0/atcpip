@@ -33,25 +33,26 @@ pub struct EthernetFrame {
 }
 
 impl EthernetHeader {
-    fn from_bytes(bytes: &[u8; 14] ) -> Self {
+    fn from_bytes(bytes: &[u8; 14]) -> Self {
         Self {
             destination_mac_address: bytes[0..6].try_into().unwrap(),
             source_mac_address: bytes[6..12].try_into().unwrap(),
-            ethernet_type: u16::from_be_bytes(bytes[12..14].try_into().unwrap())
+            ethernet_type: u16::from_be_bytes(bytes[12..14].try_into().unwrap()),
         }
     }
 
     fn to_bytes(&self) -> Bytes {
-        let mut bytes = BytesMut::zeroed(200);
+        let mut bytes = BytesMut::zeroed(12);
         bytes[0..6].copy_from_slice(&self.destination_mac_address);
         bytes[6..12].copy_from_slice(&self.source_mac_address);
         bytes.put_u16(self.ethernet_type);
+        debug_assert_eq!(bytes.len(), 14);
         bytes.freeze()
     }
 }
 
 impl EthernetFrame {
-    pub fn from_bytes(buf: &[u8]) -> Self {
+    pub fn from_slice(buf: &[u8]) -> Self {
         Self {
             header: EthernetHeader::from_bytes(&buf[0..14].try_into().unwrap()),
             payload: Bytes::copy_from_slice(&buf[14..]),
@@ -171,7 +172,7 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
                 }
                 _ => {}
             }
-        }else {
+        } else {
             // Timed out.
         }
     }

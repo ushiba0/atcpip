@@ -41,7 +41,7 @@ enum SecondCommand {
     /// TCP Client.
     Client,
     /// UDP Server.
-    UdpServer,
+    UdpNetcat,
     /// UDP Client.
     UdpClient,
 }
@@ -90,12 +90,9 @@ async fn main() -> anyhow::Result<()> {
 
     let handle = match cli_cmds.second_command {
         SecondCommand::Arping(opts) => {
-            // Call arping.
             let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
             log::info!("Destination IP Address: {ip:?}");
-
             tokio::spawn(async move { crate::arping::main(ip).await })
-            // std::process::exit(0);
         }
         SecondCommand::Ping(opts) => {
             let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
@@ -112,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
             })
         }
         SecondCommand::UdpClient => tokio::spawn(async { Ok(()) }),
-        SecondCommand::UdpServer => tokio::spawn(async move { crate::udp_netcat::main().await }),
+        SecondCommand::UdpNetcat => tokio::spawn(async move { crate::udp_netcat::main().await }),
         _ => unimplemented!(),
     };
 
@@ -130,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(0);
     });
 
-    // Call an shutdown handler,
+    // Call a shutdown handler,
     match tokio::signal::ctrl_c().await {
         Ok(()) => {
             log::info!("Signal received. Graceful Shutdown.");
