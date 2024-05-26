@@ -19,7 +19,8 @@ const PNET_RX_TIMEOUT_MICROSEC: u64 = 1000; // 1 ms
 static SEND_HANDLE: Lazy<Mutex<Option<tokio::sync::broadcast::Sender<EthernetFrame>>>> =
     Lazy::new(|| Mutex::new(None));
 
-const BUFFER_SIZE_DATALINK_SEND_CHANNEL: usize = 100;
+const BUFFER_SIZE_DATALINK_SEND_CHANNEL: usize = 8;
+const BUFFER_SIZE_ETH_SEND_CHANNEL: usize = 2;
 
 async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
     let interfaces = pnet::datalink::interfaces();
@@ -71,7 +72,7 @@ pub async fn spawn_tx_handler() {
 
     *SEND_HANDLE.lock().await = Some(iface_send);
 
-    let (eth_rx_sender, eth_rx_receiver) = mpsc::channel::<super::ethernet::EthernetFrame>(2);
+    let (eth_rx_sender, eth_rx_receiver) = mpsc::channel::<EthernetFrame>(BUFFER_SIZE_ETH_SEND_CHANNEL);
     // Spawn esthernet handler.
     tokio::spawn(async move {
         super::ethernet::ethernet_handler(eth_rx_receiver).await;

@@ -136,7 +136,6 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
     let arp_rx_sender = {
         // ARP packet が来たら、この channel で上のレイヤに通知する。
         let (arp_rx_sender, arp_rx_receiver) = broadcast::channel::<Arp>(2);
-
         // Spawn ARP handler.
         tokio::spawn(async move {
             crate::layer2::arp::arp_handler(arp_rx_receiver).await;
@@ -148,7 +147,6 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
     let ipv4_rx_sender = {
         // Ipv4 の受信を上のレイヤに伝えるチャネル.
         let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<Ipv4Frame>(2);
-
         // Spawn IPv4 handler.
         tokio::spawn(async move {
             crate::layer3::ipv4::ipv4_handler(ipv4_rx_receiver).await;
@@ -169,11 +167,12 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
                 }
                 EtherType::Ipv4 => {
                     let ipv4frame = Ipv4Frame::from_buffer(&eth_frame.payload);
-                    // Send to ipv4_handler() at crate::layer3::ipv4.
                     ipv4_rx_sender.send(ipv4frame).unwrap();
                 }
                 _ => {}
             }
+        }else {
+            // Timed out.
         }
     }
 }
