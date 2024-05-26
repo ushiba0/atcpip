@@ -5,7 +5,7 @@ use std::net::Ipv4Addr;
 mod arping;
 mod common;
 mod pingcmd;
-mod udp_netcat;
+mod udp_echo;
 
 mod layer2;
 mod layer3;
@@ -40,8 +40,8 @@ enum SecondCommand {
     Server,
     /// TCP Client.
     Client,
-    /// UDP Server.
-    UdpNetcat,
+    /// UDP echo Server.
+    UdpEchoServer(UdpEchoOpts),
     /// UDP Client.
     UdpClient,
 }
@@ -62,6 +62,13 @@ struct PingCLIOpts {
     /// ICMP payload size in bytes.
     #[clap(short, long, default_value = "20")]
     size: usize,
+}
+
+#[derive(Debug, Parser)]
+struct UdpEchoOpts {
+    /// Listen port.
+    #[clap(short, long, default_value = "1234")]
+    port: u16,
 }
 
 fn set_loglevel(cli_cmds: &CommandArguments) {
@@ -109,7 +116,9 @@ async fn main() -> anyhow::Result<()> {
             })
         }
         SecondCommand::UdpClient => tokio::spawn(async { Ok(()) }),
-        SecondCommand::UdpNetcat => tokio::spawn(async move { crate::udp_netcat::main().await }),
+        SecondCommand::UdpEchoServer(opts) => {
+            tokio::spawn(async move { crate::udp_echo::main(opts.port).await })
+        }
         _ => unimplemented!(),
     };
 
