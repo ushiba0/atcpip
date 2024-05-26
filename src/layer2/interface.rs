@@ -124,6 +124,8 @@ async fn datalink_rx_handler(
 ) -> Result<()> {
     log::info!("Spawned Datalink Rx handler.");
     loop {
+        // rx.next() は blocking なメソッドなので yield しなければならない。
+        tokio::task::yield_now().await;
         // rx.next() はパケットが届かない場合は PNET_RX_TIMEOUT_MICROSEC ms で timeout する。
         // 逆にここで PNET_RX_TIMEOUT_MICROSEC ms のブロックが発生する可能性がある。
         if let Ok(buf) = rx.next() {
