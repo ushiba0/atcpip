@@ -7,7 +7,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc::Receiver;
 
 use crate::layer2::arp::Arp;
-use crate::layer2::interface::{DEFAULT_GATEWAY, MY_IP_ADDRESS, MY_MAC_ADDRESS, SUBNET_MASK};
+use crate::layer2::interface::{DEFAULT_GATEWAY_IPV4, MY_IP_ADDRESS, MY_MAC_ADDRESS, SUBNET_MASK};
 use crate::layer3::ipv4::Ipv4Frame;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
@@ -101,10 +101,11 @@ fn is_same_subnet(dest_ip: Ipv4Addr) -> bool {
 async fn generate_ethernet_header(dest_ip: Ipv4Addr) -> Result<EthernetHeader> {
     let destination_mac_address = if is_same_subnet(dest_ip) {
         // dest_ip を ARP 解決して MAC を返す。
-        crate::layer2::arp::resolve_arp(dest_ip.octets()).await?
+        // crate::layer2::arp::resolve_arp(dest_ip.octets()).await?
+        crate::layer2::arp::resolve_arp(dest_ip).await?
     } else {
         // Default gateway をARP 解決する。
-        crate::layer2::arp::resolve_arp(DEFAULT_GATEWAY).await?
+        crate::layer2::arp::resolve_arp(DEFAULT_GATEWAY_IPV4).await?
     };
     Ok(EthernetHeader {
         destination_mac_address,

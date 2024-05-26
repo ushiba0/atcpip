@@ -1,3 +1,5 @@
+use std::net::Ipv4Addr;
+
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use pnet::datalink::{Config, DataLinkReceiver, DataLinkSender};
@@ -11,7 +13,7 @@ use crate::layer2::ethernet::EthernetFrame;
 
 pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
-pub const DEFAULT_GATEWAY: [u8; 4] = [192, 168, 1, 1];
+pub const DEFAULT_GATEWAY_IPV4: Ipv4Addr = Ipv4Addr::new(192, 168, 1, 1);
 pub const SUBNET_MASK: [u8; 4] = [255, 255, 255, 0];
 pub const MTU: usize = 1500;
 const PNET_TX_TIMEOUT_MICROSEC: u64 = 1000 * 10; // 10 ms.

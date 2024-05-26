@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+use std::net::Ipv4Addr;
+
 use bytes::Bytes;
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
 
 use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
@@ -10,7 +12,11 @@ use tokio::time::{timeout, Duration};
 use crate::layer2::ethernet::{EtherType, EthernetFrame, EthernetHeader};
 use crate::layer2::interface::{MY_IP_ADDRESS, MY_MAC_ADDRESS};
 
-static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
+// static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
+static ARP_TABLEV2: Lazy<parking_lot::RwLock<HashMap<Ipv4Addr, [u8; 6]>>> =
+    Lazy::new(Default::default);
+
+const ARP_RESOLVE_LOOP_COUNT_THRESHOULD: usize = 20;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u16)]
@@ -90,7 +96,7 @@ impl Arp {
         }
     }
 
-    pub async fn build_arp_request_packet(ip: [u8; 4]) -> Self {
+    async fn new_arp_request_packet(ip: Ipv4Addr) -> Self {
         let mut req = Arp::request_minimal();
         let my_mac = crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone);
 
@@ -100,9 +106,14 @@ impl Arp {
         req.sender_mac_address = my_mac;
         req.sender_ip_address = MY_IP_ADDRESS;
         req.target_mac_address = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-        req.target_ip_address = ip;
+        req.target_ip_address = ip.octets();
 
         req
+    }
+
+    fn get_sender_ip_address(&self) -> Ipv4Addr {
+        let s = self.sender_ip_address;
+        Ipv4Addr::new(s[0], s[1], s[2], s[3])
     }
 }
 
@@ -159,10 +170,7 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
 
             ArpOpCode::Reply => {
                 log::trace!("ARP Reply: {arp:x?}");
-                ARP_TABLE
-                    .lock()
-                    .await
-                    .insert(arp.sender_ip_address, arp.sender_mac_address);
+                ARP_TABLEV2.write().insert(arp.get_sender_ip_address(), arp.sender_mac_address);
                 // Arp 解決を待っている人に通知する。
                 arp_reply_sender.send(true).unwrap();
             }
@@ -177,33 +185,31 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
     }
 }
 
-pub async fn resolve_arp(ip: [u8; 4]) -> anyhow::Result<[u8; 6]> {
+pub async fn resolve_arp(ip: Ipv4Addr) -> anyhow::Result<[u8; 6]> {
     let mut arp_reply_notifier = crate::unwrap_or_yield!(ARP_REPLY_NOTIFIER, resubscribe);
-    const LOOP_COUNT_THRESHOULD: usize = 100;
 
-    for count in 0..LOOP_COUNT_THRESHOULD {
-        if let Some(&mac) = ARP_TABLE.lock().await.get(&ip) {
-            log::trace!("IP: {ip:x?} was resolved to MAC: {mac:x?} in {count} times loop.");
+    for count in 0..ARP_RESOLVE_LOOP_COUNT_THRESHOULD {
+        if let Some(&mac) = ARP_TABLEV2.read().get(&ip) {
             return Ok(mac);
-        } else {
-            // Resolve ARP.
-            log::trace!("Sending ARP reqest for {ip:x?}");
-            let arp_req = Arp::build_arp_request_packet(ip).await;
-            let eth_frame = arp_req.to_ethernet_frame();
-            eth_frame.send().await.unwrap();
-
-            // Ok の場合は arp (とは限らないが何かしらの arp) が帰ってきているので、次の loop で値を取り出す。
-            // Err の場合は timeout したということだが、その場合は CPU を別スレッドに一度明け渡す。
-            match timeout(Duration::from_millis(5), arp_reply_notifier.recv()).await {
-                Ok(_) => {}
-                Err(_) => tokio::task::yield_now().await,
-            }
         }
+        log::trace!("Sending ARP reqest for {ip}");
+        Arp::new_arp_request_packet(ip)
+            .await
+            .to_ethernet_frame()
+            .send()
+            .await
+            .unwrap();
+        let timeout_ms = 8 << count;
+        match timeout(Duration::from_millis(timeout_ms), arp_reply_notifier.recv()).await {
+            Ok(_) => {} // We get an arp reply. Thre value can be got in next loop.
+            Err(_) => tokio::task::yield_now().await, // Timed out. Yielding CPU to other tasks.
+        };
+        log::warn!("IP {ip} did not respond in {timeout_ms} ms. Retrying..")
     }
     let error_msg = format!(
         "[resolve_arp] Exceeded loop count threshould during ARP resolving IP {:?}",
         ip
     );
     log::warn!("{error_msg}");
-    Err(anyhow::anyhow!(error_msg))
+    anyhow::bail!(error_msg);
 }
