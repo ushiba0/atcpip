@@ -19,7 +19,7 @@ async fn wait_arp_reply(mut arp_receiver: Receiver<crate::layer2::arp::Arp>) -> 
 
 pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
     let mut req = crate::layer2::arp::Arp::request_minimal();
-    let my_mac = crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone);
+    let my_mac = *MY_MAC_ADDRESS;
 
     req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
     req.ethernet_header.source_mac_address = my_mac;

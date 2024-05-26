@@ -61,7 +61,7 @@ impl Arp {
     }
 
     pub fn request_minimal() -> Self {
-        let ethernet_header: EthernetHeader = EthernetHeader {
+        let ethernet_header = EthernetHeader {
             ethernet_type: EtherType::Arp as u16,
             ..Default::default()
         };
@@ -98,7 +98,7 @@ impl Arp {
 
     async fn new_arp_request_packet(ip: Ipv4Addr) -> Self {
         let mut req = Arp::request_minimal();
-        let my_mac = crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone);
+        let my_mac = *MY_MAC_ADDRESS;
 
         req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         req.ethernet_header.source_mac_address = my_mac;
@@ -125,11 +125,11 @@ async fn send_arp_reply(arp_req: Arp) {
 
     // Set ethernet header.
     arp_reply.ethernet_header.destination_mac_address = arp_req.ethernet_header.source_mac_address;
-    arp_reply.ethernet_header.source_mac_address = crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone);
+    arp_reply.ethernet_header.source_mac_address = *MY_MAC_ADDRESS;
 
     // Set arp payload.
     arp_reply.opcode = ArpOpCode::Reply as u16;
-    arp_reply.sender_mac_address = crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone);
+    arp_reply.sender_mac_address = *MY_MAC_ADDRESS;
     arp_reply.sender_ip_address = MY_IP_ADDRESS;
     arp_reply.target_mac_address = arp_req.sender_mac_address;
     arp_reply.target_ip_address = arp_req.sender_ip_address;
@@ -170,7 +170,9 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
 
             ArpOpCode::Reply => {
                 log::trace!("ARP Reply: {arp:x?}");
-                ARP_TABLEV2.write().insert(arp.get_sender_ip_address(), arp.sender_mac_address);
+                ARP_TABLEV2
+                    .write()
+                    .insert(arp.get_sender_ip_address(), arp.sender_mac_address);
                 // Arp 解決を待っている人に通知する。
                 arp_reply_sender.send(true).unwrap();
             }

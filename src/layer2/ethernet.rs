@@ -7,7 +7,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc::Receiver;
 
 use crate::layer2::arp::Arp;
-use crate::layer2::interface::{DEFAULT_GATEWAY_IPV4, MY_IP_ADDRESS, MY_MAC_ADDRESS, SUBNET_MASK};
+use crate::layer2::interface::{DEFAULT_GATEWAY_IPV4, MY_IP_ADDRESS, SUBNET_MASK};
 use crate::layer3::ipv4::Ipv4Frame;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
@@ -101,7 +101,6 @@ fn is_same_subnet(dest_ip: Ipv4Addr) -> bool {
 async fn generate_ethernet_header(dest_ip: Ipv4Addr) -> Result<EthernetHeader> {
     let destination_mac_address = if is_same_subnet(dest_ip) {
         // dest_ip を ARP 解決して MAC を返す。
-        // crate::layer2::arp::resolve_arp(dest_ip.octets()).await?
         crate::layer2::arp::resolve_arp(dest_ip).await?
     } else {
         // Default gateway をARP 解決する。
@@ -109,14 +108,11 @@ async fn generate_ethernet_header(dest_ip: Ipv4Addr) -> Result<EthernetHeader> {
     };
     Ok(EthernetHeader {
         destination_mac_address,
-        source_mac_address: crate::unwrap_or_yield!(MY_MAC_ADDRESS, clone),
+        source_mac_address: *crate::layer2::interface::MY_MAC_ADDRESS,
         ethernet_type: EtherType::Ipv4 as u16,
     })
 }
 
-// 設計思想:
-// 1 つ上にどんなレイヤがあるかは知っておく必要がある。
-// 下にどんなレイヤがあるかは全く知る必要がない。
 pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> Result<usize> {
     let destination_ip = ipv4_frame.get_destination_address();
     let eth_header = generate_ethernet_header(destination_ip).await?;

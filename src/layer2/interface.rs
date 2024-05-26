@@ -11,11 +11,22 @@ use tokio::sync::Mutex;
 
 use crate::layer2::ethernet::EthernetFrame;
 
-pub static MY_MAC_ADDRESS: Lazy<Mutex<Option<[u8; 6]>>> = Lazy::new(|| Mutex::new(None));
+pub static MY_MAC_ADDRESS: Lazy<[u8; 6]> = Lazy::new(|| {
+    let interfaces = pnet::datalink::interfaces();
+    let interface = interfaces
+        .into_iter()
+        .find(|e| e.name == crate::layer2::interface::INTERFACE_NAME)
+        .unwrap();
+    let mac = interface.mac.unwrap().octets();
+    log::info!("Initialized MAC ADDRESS {mac:x?}.");
+    mac
+});
+
 pub const MY_IP_ADDRESS: [u8; 4] = [192, 168, 1, 237];
 pub const DEFAULT_GATEWAY_IPV4: Ipv4Addr = Ipv4Addr::new(192, 168, 1, 1);
 pub const SUBNET_MASK: [u8; 4] = [255, 255, 255, 0];
 pub const MTU: usize = 1500;
+pub const INTERFACE_NAME: &str = "ens192";
 const PNET_TX_TIMEOUT_MICROSEC: u64 = 1000 * 10; // 10 ms.
 const PNET_RX_TIMEOUT_MICROSEC: u64 = 1000; // 1 ms
 static SEND_HANDLE: Lazy<Mutex<Option<tokio::sync::broadcast::Sender<EthernetFrame>>>> =
@@ -30,11 +41,11 @@ async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkRecei
 
     let interface = interfaces
         .into_iter()
-        .find(|e| e.name == "ens192")
+        .find(|e| e.name == INTERFACE_NAME)
         .context("Interface not found.")?;
 
-    let mac = interface.mac.context("MAC address is not set.")?.octets();
-    *MY_MAC_ADDRESS.lock().await = Some(mac);
+    // let mac = interface.mac.context("MAC address is not set.")?.octets();
+    // *MY_MAC_ADDRESS.lock().await = Some(mac);
 
     use std::time::Duration;
     let config = Config {
