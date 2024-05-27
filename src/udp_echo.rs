@@ -9,5 +9,6 @@ pub async fn main(port: u16) -> Result<()> {
         let (source_ip, bytes) = socket.recv_from().await;
         let message = std::str::from_utf8(&bytes)?;
         println!("[UDP Data from {source_ip:?}] {:?}", message);
+        socket.send_to(bytes, source_ip).await?;
     }
 }

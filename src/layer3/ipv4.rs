@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
 
 use bit_field::BitField;
 use bytes::{Bytes, BytesMut};
@@ -347,4 +348,16 @@ impl Ipv4FrameUnchecked {
         }
         Ok(())
     }
+}
+
+pub async fn send_udp(
+    udppacket: crate::layer4::udp::UdpPacket,
+    target_ip: &Ipv4Addr,
+) -> anyhow::Result<()> {
+    let bytes = udppacket.to_bytes();
+    let ip_packet = Ipv4FrameUnchecked::new()
+        .set_ipav4addr(target_ip.octets())
+        .set_protcol(Ipv4Protcol::Udp)
+        .set_payload(&bytes)?;
+    ip_packet.safely_send().await
 }
