@@ -11,6 +11,26 @@ macro_rules! unwrap_or_yield {
     };
 }
 
+#[macro_export]
+macro_rules! impl_get {
+    ($name:ident, $field:ident, $start:expr, $end:expr, $type:ty) => {
+        pub fn $name(&self) -> $type {
+            let bytes: &[u8] = &self.$field[$start..$end];
+            <$type>::from_be_bytes(bytes.try_into().unwrap())
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_set {
+    ($name:ident, $field:ident, $start:expr, $end:expr, $type:ty) => {
+        pub fn $name(&mut self, value: $type) -> &mut Self {
+            self.$field[$start..$end].copy_from_slice(&value.to_be_bytes());
+            self
+        }
+    };
+}
+
 pub fn calc_checksum(data: &[u8]) -> u16 {
     let mut sum = 0usize;
     let mut chunks = data.chunks_exact(2);

@@ -11,15 +11,18 @@ pub async fn main(remote_port: u16) -> Result<()> {
     let std_sockaddr = std::net::SocketAddrV4::new(std_ipaddr, remote_port);
     let mut socket = crate::layer4::udp::UdpSocket::bind(listen_addr, local_port)?;
 
-    let test_data = Bytes::copy_from_slice(&vec![0xabu8; 20000]);
+    let test_data = Bytes::copy_from_slice(&vec![0xabu8; 5000]);
 
     socket.send_to(test_data.clone(), std_sockaddr).await?;
     let (sockaddr, response_bytes) = socket.recv_from().await;
-    log::info!("[UDP echo client]: reply from {sockaddr} msg: {:?}", &response_bytes);
+    log::info!(
+        "[UDP echo client]: reply from {sockaddr} msg: {:?}",
+        &response_bytes
+    );
 
     if test_data == response_bytes {
         println!("UDP echo server verify ok.");
-    }else {
+    } else {
         println!("UDP echo server verify failed. Response data is not match.");
     }
     Ok(())

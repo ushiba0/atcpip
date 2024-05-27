@@ -11,11 +11,13 @@ use crate::layer3::ipv4::Ipv4Frame;
 // https://datatracker.ietf.org/doc/html/rfc768
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct UdpPacket {
-    source_port: u16,
-    target_port: u16,
-    length: u16,
-    checksum: u16,
-    payload: Bytes,
+    bytes: Bytes,
+}
+
+// https://datatracker.ietf.org/doc/html/rfc768
+#[derive(Debug, Default, PartialEq, Clone)]
+pub struct UdpPacketUnchecked {
+    bytes: BytesMut,
 }
 
 #[derive(Debug)]
@@ -27,22 +29,45 @@ pub struct UdpSocket {
 impl UdpPacket {
     pub fn from_bytes(bytes: &Bytes) -> Self {
         Self {
-            source_port: u16::from_be_bytes([bytes[0], bytes[1]]),
-            target_port: u16::from_be_bytes([bytes[2], bytes[3]]),
-            length: u16::from_be_bytes([bytes[4], bytes[5]]),
-            checksum: u16::from_be_bytes([bytes[6], bytes[7]]),
-            payload: bytes.slice(8..),
+            bytes: bytes.clone(),
         }
     }
 
     pub fn to_bytes(&self) -> Bytes {
-        let mut bytes = BytesMut::new();
-        bytes.put_u16(self.source_port);
-        bytes.put_u16(self.target_port);
-        bytes.put_u16(self.length);
-        bytes.put_u16(self.checksum);
-        bytes.put(self.payload.clone());
-        bytes.freeze()
+        self.bytes.clone()
+    }
+
+    crate::impl_get!(get_source_port, bytes, 0, 2, u16);
+    crate::impl_get!(get_target_port, bytes, 2, 4, u16);
+    crate::impl_get!(get_length, bytes, 4, 6, u16);
+    crate::impl_get!(get_checksum, bytes, 6, 8, u16);
+
+    pub fn get_payload(&self) -> Bytes {
+        self.bytes.slice(8..)
+    }
+}
+
+impl UdpPacketUnchecked {
+    pub fn new() -> Self {
+        Self {
+            bytes: BytesMut::zeroed(8),
+        }
+    }
+
+    crate::impl_set!(set_source_port, bytes, 0, 2, u16);
+    crate::impl_set!(set_target_port, bytes, 2, 4, u16);
+    crate::impl_set!(set_length, bytes, 4, 6, u16);
+    crate::impl_set!(set_checksum, bytes, 6, 8, u16);
+
+    pub fn set_payload(&mut self, payload: &Bytes) -> &Self {
+        self.bytes.put(payload.clone());
+        self
+    }
+
+    pub fn freeze(&self) -> UdpPacket {
+        UdpPacket {
+            bytes: self.bytes.clone().freeze(),
+        }
     }
 }
 
@@ -78,16 +103,16 @@ impl UdpSocket {
     pub async fn send_to(&self, bytes: Bytes, addr: std::net::SocketAddrV4) -> anyhow::Result<()> {
         // Todo: MTU を考慮してパケットを分割して送る。なくてもいい。
 
-        const UDP_HEADER_SIZE: u16 = 8;
         let target_ip = addr.ip();
 
-        let udp_pkt = UdpPacket {
-            source_port: self.local_port,
-            target_port: addr.port(),
-            length: bytes.len() as u16 + UDP_HEADER_SIZE,
-            checksum: 0, // Todo: Checksum の計算.
-            payload: bytes,
-        };
+        let mut udp_pkt_unckecked = UdpPacketUnchecked::new();
+        udp_pkt_unckecked
+            .set_source_port(self.local_port)
+            .set_target_port(addr.port())
+            .set_length(bytes.len() as u16)
+            .set_checksum(0)
+            .set_payload(&bytes);
+        let udp_pkt = udp_pkt_unckecked.freeze();
 
         crate::layer3::ipv4::send_udp(udp_pkt, target_ip).await
     }
@@ -97,23 +122,26 @@ pub async fn udp_handler(mut receiver: Receiver<Ipv4Frame>) -> anyhow::Result<()
     loop {
         let ipv4_frame = receiver.recv().await.context("closed")?;
         let source_ip = ipv4_frame.get_source_address();
+        // let udp_packet = UdpPacket::from_bytes(&ipv4_frame.payload);
         let udp_packet = UdpPacket::from_bytes(&ipv4_frame.payload);
 
         // Todo: Checksum の計算
+        let _ = udp_packet.get_checksum();
+        let _ = udp_packet.get_length();
 
         // sender を clone して使わない場合、RwLock が sender().send().await() を跨ぐ
         // ことになりコンパイルエラーとなる。
-        let sender = match PORT_MAP.read().get(&udp_packet.target_port) {
+        let sender = match PORT_MAP.read().get(&udp_packet.get_target_port()) {
             Some(v) => v.clone(),
             None => {
                 log::warn!("[udp_handler] listen していない port 宛に UDP パケットが来た。");
                 continue;
             }
         };
-        let std_sockaddrv4 = std::net::SocketAddrV4::new(source_ip, udp_packet.source_port);
+        let std_sockaddrv4 = std::net::SocketAddrV4::new(source_ip, udp_packet.get_source_port());
         let std_sockaddr = std::net::SocketAddr::from(std_sockaddrv4);
         sender
-            .send((std_sockaddr, udp_packet.payload))
+            .send((std_sockaddr, udp_packet.get_payload()))
             .await
             .unwrap();
     }
