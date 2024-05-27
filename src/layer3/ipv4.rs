@@ -210,6 +210,7 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Frame>) {
     // UDP の受信を通知するチャネル.
     let (udp_rx_sender, udp_rx_receiver) = mpsc::channel::<Ipv4Frame>(2);
     // Spawn UDP handler.
+    #[allow(clippy::let_underscore_future)]
     let _: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
         crate::layer4::udp::udp_handler(udp_rx_receiver).await?;
         Ok(())

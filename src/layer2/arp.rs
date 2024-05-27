@@ -92,7 +92,6 @@ impl Arp {
         EthernetFrame {
             header: self.ethernet_header.clone(),
             payload: Bytes::copy_from_slice(&payload),
-            ..Default::default()
         }
     }
 

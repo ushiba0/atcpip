@@ -119,8 +119,7 @@ pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> Result<usi
 
     let ether_frame = EthernetFrame {
         header: eth_header,
-        payload: Bytes::copy_from_slice(&ipv4_frame.clone().build_to_bytes().to_vec()),
-        ..Default::default()
+        payload: Bytes::copy_from_slice(&ipv4_frame.clone().build_to_bytes()),
     };
 
     ether_frame.send().await
