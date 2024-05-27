@@ -276,6 +276,7 @@ impl Ipv4FrameUnchecked {
         self
     }
 
+    // ipv4unchecked の set_payload を Bytes にする。
     pub fn set_payload(mut self, payload: &[u8]) -> anyhow::Result<Self> {
         anyhow::ensure!(
             payload.len() < IPV4_MAX_PAYLOAD_SIZE,

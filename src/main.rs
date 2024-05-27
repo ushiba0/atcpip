@@ -6,6 +6,7 @@ mod arping;
 mod common;
 mod pingcmd;
 mod udp_echo;
+mod udp_echo_verify;
 
 mod layer2;
 mod layer3;
@@ -42,6 +43,8 @@ enum SecondCommand {
     Client,
     /// UDP echo Server.
     UdpEchoServer(UdpEchoOpts),
+    /// UDP echo veririer.
+    UdpEchoVerify,
     /// UDP Client.
     UdpClient,
 }
@@ -118,6 +121,9 @@ async fn main() -> anyhow::Result<()> {
         SecondCommand::UdpClient => tokio::spawn(async { Ok(()) }),
         SecondCommand::UdpEchoServer(opts) => {
             tokio::spawn(async move { crate::udp_echo::main(opts.port).await })
+        }
+        SecondCommand::UdpEchoVerify => {
+            tokio::spawn(async { crate::udp_echo_verify::main(1234).await })
         }
         _ => unimplemented!(),
     };

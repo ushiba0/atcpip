@@ -88,7 +88,7 @@ impl UdpSocket {
             checksum: 0, // Todo: Checksum の計算.
             payload: bytes,
         };
-        
+
         crate::layer3::ipv4::send_udp(udp_pkt, target_ip).await
     }
 }
