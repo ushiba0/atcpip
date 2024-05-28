@@ -5,7 +5,7 @@ use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
 
 use crate::common::calc_checksum;
-use crate::layer3::ipv4::Ipv4Frame;
+use crate::layer3::ipv4::Ipv4Packet;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u8)]
@@ -102,7 +102,7 @@ impl Icmp {
 }
 
 async fn send_icmp_echo_reply(
-    ipv4_frame: Ipv4Frame,
+    ipv4_frame: Ipv4Packet,
     icmp_echo_request: Icmp,
 ) -> anyhow::Result<()> {
     let echo_reply = Icmp::echo_reply_minimal()
@@ -123,20 +123,20 @@ async fn send_icmp_echo_reply(
     Ok(())
 }
 
-pub static ICMP_REPLY_NOTIFIER: Lazy<Mutex<Option<Receiver<Ipv4Frame>>>> =
+pub static ICMP_REPLY_NOTIFIER: Lazy<Mutex<Option<Receiver<Ipv4Packet>>>> =
     Lazy::new(Default::default);
 
-pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Frame>) {
+pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Packet>) {
     // 必要にであれば icmp_receive をクローンして Global 変数として保存する。
     // いまは必要ないためそうしていない。
 
     // ICMP の受信を通知するためのチャネル.
-    let (icmp_notifier_sender, icmp_notifier_receiver) = broadcast::channel::<Ipv4Frame>(2);
+    let (icmp_notifier_sender, icmp_notifier_receiver) = broadcast::channel::<Ipv4Packet>(2);
     *ICMP_REPLY_NOTIFIER.lock().await = Some(icmp_notifier_receiver);
 
     loop {
         let ipv4frame = icmp_receive.recv().await.unwrap();
-        let icmp = Icmp::from_buffer(&ipv4frame.payload);
+        let icmp = Icmp::from_buffer(&ipv4frame.get_payload());
 
         // Checksum の計算
         if icmp.get_checksum() != 0 {

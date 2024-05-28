@@ -6,7 +6,9 @@ use bytes::{BufMut, Bytes, BytesMut};
 use once_cell::sync::Lazy;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-use crate::layer3::ipv4::Ipv4Frame;
+use crate::layer3::ipv4::Ipv4Packet;
+
+const UDP_HEADER_SIZE: usize = 8;
 
 // https://datatracker.ietf.org/doc/html/rfc768
 #[derive(Debug, Default, PartialEq, Clone)]
@@ -16,7 +18,7 @@ pub struct UdpPacket {
 
 // https://datatracker.ietf.org/doc/html/rfc768
 #[derive(Debug, Default, PartialEq, Clone)]
-pub struct UdpPacketUnchecked {
+pub struct UdpPacketUnverified {
     bytes: BytesMut,
 }
 
@@ -47,7 +49,7 @@ impl UdpPacket {
     }
 }
 
-impl UdpPacketUnchecked {
+impl UdpPacketUnverified {
     pub fn new() -> Self {
         Self {
             bytes: BytesMut::zeroed(8),
@@ -60,6 +62,7 @@ impl UdpPacketUnchecked {
     crate::impl_set!(set_checksum, bytes, 6, 8, u16);
 
     pub fn set_payload(&mut self, payload: &Bytes) -> &Self {
+        debug_assert_eq!(self.bytes.len(), UDP_HEADER_SIZE);
         self.bytes.put(payload.clone());
         self
     }
@@ -105,7 +108,7 @@ impl UdpSocket {
 
         let target_ip = addr.ip();
 
-        let mut udp_pkt_unckecked = UdpPacketUnchecked::new();
+        let mut udp_pkt_unckecked = UdpPacketUnverified::new();
         udp_pkt_unckecked
             .set_source_port(self.local_port)
             .set_target_port(addr.port())
@@ -118,12 +121,12 @@ impl UdpSocket {
     }
 }
 
-pub async fn udp_handler(mut receiver: Receiver<Ipv4Frame>) -> anyhow::Result<()> {
+pub async fn udp_handler(mut receiver: Receiver<Ipv4Packet>) -> anyhow::Result<()> {
     loop {
         let ipv4_frame = receiver.recv().await.context("closed")?;
         let source_ip = ipv4_frame.get_source_address();
         // let udp_packet = UdpPacket::from_bytes(&ipv4_frame.payload);
-        let udp_packet = UdpPacket::from_bytes(&ipv4_frame.payload);
+        let udp_packet = UdpPacket::from_bytes(&ipv4_frame.get_payload());
 
         // Todo: Checksum の計算
         let _ = udp_packet.get_checksum();

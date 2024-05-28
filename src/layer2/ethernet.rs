@@ -8,7 +8,7 @@ use tokio::sync::mpsc::Receiver;
 
 use crate::layer2::arp::Arp;
 use crate::layer2::interface::{DEFAULT_GATEWAY_IPV4, MY_IP_ADDRESS, SUBNET_MASK};
-use crate::layer3::ipv4::Ipv4Frame;
+use crate::layer3::ipv4::Ipv4Packet;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u16)]
@@ -113,13 +113,13 @@ async fn generate_ethernet_header(dest_ip: Ipv4Addr) -> Result<EthernetHeader> {
     })
 }
 
-pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Frame) -> Result<usize> {
+pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Packet) -> Result<usize> {
     let destination_ip = ipv4_frame.get_destination_address();
     let eth_header = generate_ethernet_header(destination_ip).await?;
 
     let ether_frame = EthernetFrame {
         header: eth_header,
-        payload: Bytes::copy_from_slice(&ipv4_frame.clone().build_to_bytes()),
+        payload: Bytes::copy_from_slice(&ipv4_frame.to_bytes()),
     };
 
     ether_frame.send().await
@@ -143,7 +143,7 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
     // IPv4 ハンドラスレッドを spawn し、 IPv4 ハンドラスレッドに通知する用の Sender を返す。
     let ipv4_rx_sender = {
         // Ipv4 の受信を上のレイヤに伝えるチャネル.
-        let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<Ipv4Frame>(2);
+        let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<Ipv4Packet>(2);
         // Spawn IPv4 handler.
         tokio::spawn(async move {
             crate::layer3::ipv4::ipv4_handler(ipv4_rx_receiver).await;
@@ -163,7 +163,7 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
                     arp_rx_sender.send(arp).unwrap();
                 }
                 EtherType::Ipv4 => {
-                    let ipv4frame = Ipv4Frame::from_buffer(&eth_frame.payload);
+                    let ipv4frame = Ipv4Packet::from_bytes(&eth_frame.payload);
                     ipv4_rx_sender.send(ipv4frame).unwrap();
                 }
                 _ => {}

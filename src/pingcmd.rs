@@ -80,7 +80,7 @@ async fn icmp_echo_reply_listener_with_timeout(
         let mut icmp_notifier_receiver = crate::unwrap_or_yield!(ICMP_REPLY_NOTIFIER, resubscribe);
         loop {
             let ipv4frame = icmp_notifier_receiver.recv().await.unwrap();
-            let icmp = Icmp::from_buffer(&ipv4frame.payload);
+            let icmp = Icmp::from_buffer(&ipv4frame.get_payload());
             if icmp.icmp_type == IcmpType::Reply as u8
                 && ipv4frame.get_source_address().octets() == ip
                 && icmp.identifier == identifier
