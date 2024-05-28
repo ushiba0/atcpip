@@ -5,6 +5,7 @@ use bit_field::BitField;
 use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use rand::Rng;
 
 use tokio::sync::broadcast::{self, Receiver};
@@ -71,13 +72,11 @@ impl Ipv4Packet {
     }
 
     pub fn get_source_address(&self) -> Ipv4Addr {
-        let ip = self.get_source_address_slice();
-        Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])
+        self.get_source_address_slice().into()
     }
 
     pub fn get_destination_address(&self) -> Ipv4Addr {
-        let ip = self.get_destination_address_slice();
-        Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])
+        self.get_destination_address_slice().into()
     }
 
     pub fn get_payload(&self) -> Bytes {
@@ -162,10 +161,11 @@ impl Ipv4PacketUnverified {
     }
 }
 
-static IPV4_RECEIVER: Lazy<Mutex<Option<Receiver<Ipv4Packet>>>> = Lazy::new(Default::default);
+static IPV4_RECEIVER2: Lazy<parking_lot::RwLock<Option<broadcast::Receiver<Ipv4Packet>>>> =
+    Lazy::new(Default::default);
 
 pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Packet>) {
-    *IPV4_RECEIVER.lock().await = Some(ipv4_receive.resubscribe());
+    *IPV4_RECEIVER2.write() = Some(ipv4_receive.resubscribe());
 
     // ICMP の襲来を通知するチャネル.
     let (icmp_rx_sender, icmp_rx_receiver) = broadcast::channel::<Ipv4Packet>(2);
