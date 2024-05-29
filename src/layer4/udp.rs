@@ -6,13 +6,16 @@ use bytes::{BufMut, Bytes, BytesMut};
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 
-use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::broadcast;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::layer3::ipv4::Ipv4Packet;
 
 pub static UDP_CHANNEL: Lazy<
-    parking_lot::RwLock<(broadcast::Sender<Ipv4Packet>, broadcast::Receiver<Ipv4Packet>)>,
+    parking_lot::RwLock<(
+        broadcast::Sender<Ipv4Packet>,
+        broadcast::Receiver<Ipv4Packet>,
+    )>,
 > = Lazy::new(|| {
     let (udp_ch_sender, udp_ch_receiver) = broadcast::channel::<Ipv4Packet>(2);
     RwLock::new((udp_ch_sender, udp_ch_receiver))

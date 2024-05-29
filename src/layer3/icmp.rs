@@ -102,7 +102,7 @@ impl Icmp {
         calc_checksum(&self.to_bytes_inner())
     }
 
-    pub fn from_buffer(buf: &[u8]) ->anyhow::Result <Self> {
+    pub fn from_buffer(buf: &[u8]) -> anyhow::Result<Self> {
         Ok(Self {
             icmp_type: buf[0],
             code: buf[1],

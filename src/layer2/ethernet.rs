@@ -136,7 +136,7 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
     });
 
     tokio::spawn(async move {
-        crate::layer3::ipv4::ipv4_handler().await;
+        crate::layer3::ipv4::ipv4_handler().await.unwrap();
     });
 
     loop {

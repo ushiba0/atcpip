@@ -16,7 +16,10 @@ use crate::layer2::interface::MY_IP_ADDRESS;
 mod reassemble_ipv4;
 
 pub static IPV4_RECEIVER: Lazy<
-    parking_lot::RwLock<(broadcast::Sender<Ipv4Packet>, broadcast::Receiver<Ipv4Packet>)>,
+    parking_lot::RwLock<(
+        broadcast::Sender<Ipv4Packet>,
+        broadcast::Receiver<Ipv4Packet>,
+    )>,
 > = Lazy::new(|| {
     let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<Ipv4Packet>(2);
     RwLock::new((ipv4_rx_sender, ipv4_rx_receiver))
@@ -166,7 +169,7 @@ impl Ipv4PacketUnverified {
     }
 }
 
-pub async fn ipv4_handler() {
+pub async fn ipv4_handler() -> anyhow::Result<()> {
     log::info!("Spawned IPv4 handler.");
     let mut ipv4_receive = IPV4_RECEIVER.read().1.resubscribe();
     let icmp_rx_sender = crate::layer3::icmp::ICMP_CHANNEL.read().0.clone();
@@ -186,7 +189,7 @@ pub async fn ipv4_handler() {
     let mut tmp_pool: HashMap<u16, Vec<Ipv4Packet>> = HashMap::new();
 
     loop {
-        let ipv4frame = ipv4_receive.recv().await.unwrap();
+        let ipv4frame = ipv4_receive.recv().await?;
 
         if ipv4frame.get_destination_address_slice() != MY_IP_ADDRESS {
             continue;
@@ -213,10 +216,10 @@ pub async fn ipv4_handler() {
         let protcol = Ipv4Protcol::from_u8(ipv4frame.get_protcol_u8()).unwrap_or_default();
         match protcol {
             Ipv4Protcol::Icmp => {
-                icmp_rx_sender.send(ipv4frame).unwrap();
+                icmp_rx_sender.send(ipv4frame)?;
             }
             Ipv4Protcol::Udp => {
-                udp_ch_sender.send(ipv4frame).unwrap();
+                udp_ch_sender.send(ipv4frame)?;
             }
             _ => {
                 log::warn!("Uninplemented IPv4 protcol: {protcol:?}");
@@ -296,8 +299,8 @@ impl Ipv4FrameUnchecked {
                 let self_copy = self.clone().set_payload(chunk).unwrap();
                 let mut pkt: Ipv4PacketUnverified = self_copy.build().to_unverified();
                 pkt.set_fragment_mf_bit(true)
-                    .set_flagment_offset(flagment_offset);
-                pkt.set_identification(identification);
+                    .set_flagment_offset(flagment_offset)
+                    .set_identification(identification);
                 flagment_offset = flagment_offset.wrapping_add(chunk.len() as u16);
                 ips.push(pkt.to_ipv4packet());
             }
@@ -308,7 +311,6 @@ impl Ipv4FrameUnchecked {
                 .to_unverified()
                 .set_fragment_mf_bit(false)
                 .to_ipv4packet();
-            // debug_assert!(!ips.last().unwrap().get_fragment_mf_bit());
 
             ips
         }
