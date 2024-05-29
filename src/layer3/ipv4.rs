@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use rand::Rng;
 
-use tokio::sync::broadcast::{self, Receiver};
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -16,6 +16,13 @@ use crate::common::calc_checksum;
 use crate::layer2::interface::MY_IP_ADDRESS;
 
 mod reassemble_ipv4;
+
+pub static IPV4_RECEIVER: Lazy<
+    parking_lot::RwLock<(broadcast::Sender<Ipv4Packet>, broadcast::Receiver<Ipv4Packet>)>,
+> = Lazy::new(|| {
+    let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    RwLock::new((ipv4_rx_sender, ipv4_rx_receiver))
+});
 
 const IPV4_HEADER_LEN: usize = 20;
 const IPV4_MAX_PAYLOAD_SIZE: usize = 65536;
@@ -161,11 +168,9 @@ impl Ipv4PacketUnverified {
     }
 }
 
-static IPV4_RECEIVER2: Lazy<RwLock<Option<broadcast::Receiver<Ipv4Packet>>>> =
-    Lazy::new(Default::default);
-
-pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Packet>) {
-    *IPV4_RECEIVER2.write() = Some(ipv4_receive.resubscribe());
+pub async fn ipv4_handler() {
+    log::info!("Spawned IPv4 handler.");
+    let mut ipv4_receive = IPV4_RECEIVER.read().1.resubscribe();
 
     // ICMP の襲来を通知するチャネル.
     let (icmp_rx_sender, icmp_rx_receiver) = broadcast::channel::<Ipv4Packet>(2);

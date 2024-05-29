@@ -3,7 +3,6 @@ use std::net::Ipv4Addr;
 use anyhow::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::FromPrimitive;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc::Receiver;
 
 use crate::layer2::arp::Arp;
@@ -130,20 +129,15 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
     log::info!("Spawned Ethernet Rx handler.");
 
     let arp_rx_sender = crate::layer2::arp::ARP_RECEIVER.read().0.clone();
+    let ipv4_rx_sender = crate::layer3::ipv4::IPV4_RECEIVER.read().0.clone();
+
     tokio::spawn(async move {
         crate::layer2::arp::arp_handler().await.unwrap();
     });
 
-    // IPv4 ハンドラスレッドを spawn し、 IPv4 ハンドラスレッドに通知する用の Sender を返す。
-    let ipv4_rx_sender = {
-        // Ipv4 の受信を上のレイヤに伝えるチャネル.
-        let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<Ipv4Packet>(2);
-        // Spawn IPv4 handler.
-        tokio::spawn(async move {
-            crate::layer3::ipv4::ipv4_handler(ipv4_rx_receiver).await;
-        });
-        ipv4_rx_sender
-    };
+    tokio::spawn(async move {
+        crate::layer3::ipv4::ipv4_handler().await;
+    });
 
     loop {
         tokio::task::yield_now().await;
