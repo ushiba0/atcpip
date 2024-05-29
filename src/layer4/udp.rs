@@ -4,9 +4,19 @@ use std::net::{Ipv4Addr, SocketAddr};
 use anyhow::{ensure, Context};
 use bytes::{BufMut, Bytes, BytesMut};
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
+
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::broadcast;
 
 use crate::layer3::ipv4::Ipv4Packet;
+
+pub static UDP_CHANNEL: Lazy<
+    parking_lot::RwLock<(broadcast::Sender<Ipv4Packet>, broadcast::Receiver<Ipv4Packet>)>,
+> = Lazy::new(|| {
+    let (udp_ch_sender, udp_ch_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    RwLock::new((udp_ch_sender, udp_ch_receiver))
+});
 
 const UDP_HEADER_SIZE: usize = 8;
 
@@ -121,7 +131,9 @@ impl UdpSocket {
     }
 }
 
-pub async fn udp_handler(mut receiver: Receiver<Ipv4Packet>) -> anyhow::Result<()> {
+pub async fn udp_handler() -> anyhow::Result<()> {
+    log::info!("Spawned UDP handler.");
+    let mut receiver = UDP_CHANNEL.read().1.resubscribe();
     loop {
         let ipv4_frame = receiver.recv().await.context("closed")?;
         let source_ip = ipv4_frame.get_source_address();

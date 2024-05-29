@@ -9,8 +9,6 @@ use parking_lot::RwLock;
 use rand::Rng;
 
 use tokio::sync::broadcast;
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 
 use crate::common::calc_checksum;
 use crate::layer2::interface::MY_IP_ADDRESS;
@@ -172,19 +170,16 @@ pub async fn ipv4_handler() {
     log::info!("Spawned IPv4 handler.");
     let mut ipv4_receive = IPV4_RECEIVER.read().1.resubscribe();
     let icmp_rx_sender = crate::layer3::icmp::ICMP_CHANNEL.read().0.clone();
+    let udp_ch_sender = crate::layer4::udp::UDP_CHANNEL.read().0.clone();
 
     // Spawn ICMP handler.
     tokio::spawn(async move {
         super::icmp::icmp_handler().await.unwrap();
     });
 
-    // UDP の受信を通知するチャネル.
-    let (udp_rx_sender, udp_rx_receiver) = mpsc::channel::<Ipv4Packet>(2);
     // Spawn UDP handler.
-    #[allow(clippy::let_underscore_future)]
-    let _: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
-        crate::layer4::udp::udp_handler(udp_rx_receiver).await?;
-        Ok(())
+    tokio::spawn(async move {
+        crate::layer4::udp::udp_handler().await.unwrap();
     });
 
     // Buffer for IP Fragmentation.
@@ -221,7 +216,7 @@ pub async fn ipv4_handler() {
                 icmp_rx_sender.send(ipv4frame).unwrap();
             }
             Ipv4Protcol::Udp => {
-                udp_rx_sender.send(ipv4frame).await.unwrap();
+                udp_ch_sender.send(ipv4frame).unwrap();
             }
             _ => {
                 log::warn!("Uninplemented IPv4 protcol: {protcol:?}");
