@@ -129,16 +129,10 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
     // Datalink Rx.
     log::info!("Spawned Ethernet Rx handler.");
 
-    // ARP ハンドラスレッドを spawn し、 ARP ハンドラスレッドに通知する用の Sender を返す。
-    let arp_rx_sender = {
-        // ARP packet が来たら、この channel で上のレイヤに通知する。
-        let (arp_rx_sender, arp_rx_receiver) = broadcast::channel::<Arp>(2);
-        // Spawn ARP handler.
-        tokio::spawn(async move {
-            crate::layer2::arp::arp_handler(arp_rx_receiver).await;
-        });
-        arp_rx_sender
-    };
+    let arp_rx_sender = crate::layer2::arp::ARP_RECEIVER.read().0.clone();
+    tokio::spawn(async move {
+        crate::layer2::arp::arp_handler().await.unwrap();
+    });
 
     // IPv4 ハンドラスレッドを spawn し、 IPv4 ハンドラスレッドに通知する用の Sender を返す。
     let ipv4_rx_sender = {

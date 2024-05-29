@@ -6,17 +6,29 @@ use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 
 use parking_lot::RwLock;
-use tokio::sync::broadcast::{self, Receiver};
-use tokio::sync::Mutex;
+use tokio::sync::broadcast;
 use tokio::time::{timeout, Duration};
 
 use crate::layer2::ethernet::{EtherType, EthernetFrame, EthernetHeader};
 use crate::layer2::interface::{MY_IP_ADDRESS, MY_MAC_ADDRESS};
 
-static ARP_TABLE: Lazy<parking_lot::RwLock<HashMap<Ipv4Addr, [u8; 6]>>> =
-    Lazy::new(Default::default);
+static ARP_TABLE: Lazy<RwLock<HashMap<Ipv4Addr, [u8; 6]>>> = Lazy::new(Default::default);
 
-const ARP_RESOLVE_LOOP_COUNT_THRESHOULD: usize = 20;
+pub static ARP_RECEIVER: Lazy<
+    parking_lot::RwLock<(broadcast::Sender<Arp>, broadcast::Receiver<Arp>)>,
+> = Lazy::new(|| {
+    let (arp_rx_sender, arp_rx_receiver) = broadcast::channel::<Arp>(2);
+    RwLock::new((arp_rx_sender, arp_rx_receiver))
+});
+
+pub static ARP_REPLY_NOTIFIER: Lazy<
+    parking_lot::RwLock<(broadcast::Sender<()>, broadcast::Receiver<()>)>,
+> = Lazy::new(|| {
+    let (arp_reply_sender, arp_reply_receiver) = broadcast::channel::<()>(2);
+    RwLock::new((arp_reply_sender, arp_reply_receiver))
+});
+
+const ARP_RESOLVE_LOOP_COUNT_THRESHOULD: usize = 10;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u16)]
@@ -60,18 +72,19 @@ impl Arp {
         })
     }
 
-    pub fn request_minimal() -> Self {
-        let ethernet_header = EthernetHeader {
-            ethernet_type: EtherType::Arp as u16,
-            ..Default::default()
-        };
+    pub fn minimal() -> Self {
         Self {
-            ethernet_header,
+            ethernet_header: EthernetHeader {
+                ethernet_type: EtherType::Arp as u16,
+                source_mac_address: *MY_MAC_ADDRESS,
+                ..Default::default()
+            },
             hardware_type: 0x0001,
             protcol_type: 0x0800,
             hardware_address_length: 0x06,
             protcol_address_length: 0x04,
-            opcode: ArpOpCode::Request as u16,
+            sender_mac_address: *MY_MAC_ADDRESS,
+            sender_ip_address: MY_IP_ADDRESS,
             ..Default::default()
         }
     }
@@ -96,17 +109,11 @@ impl Arp {
     }
 
     async fn new_arp_request_packet(ip: Ipv4Addr) -> Self {
-        let mut req = Arp::request_minimal();
-        let my_mac = *MY_MAC_ADDRESS;
-
+        let mut req = Arp::minimal();
         req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
-        req.ethernet_header.source_mac_address = my_mac;
-
-        req.sender_mac_address = my_mac;
-        req.sender_ip_address = MY_IP_ADDRESS;
         req.target_mac_address = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         req.target_ip_address = ip.octets();
-
+        req.opcode = ArpOpCode::Request as u16;
         req
     }
 
@@ -115,43 +122,28 @@ impl Arp {
     }
 }
 
-pub static ARP_RECEIVER: Lazy<Mutex<Option<Receiver<Arp>>>> = Lazy::new(Default::default);
-
-pub static ARP_REPLY_NOTIFIER: Lazy<
-    parking_lot::RwLock<(
-        broadcast::Sender<()>,
-        broadcast::Receiver<()>,
-    )>,
-> = Lazy::new(|| {
-    let (arp_reply_sender, arp_reply_receiver) =
-        broadcast::channel::<()>(2);
-    RwLock::new((arp_reply_sender, arp_reply_receiver))
-});
-
-async fn send_arp_reply(arp_req: Arp) {
-    let mut arp_reply = Arp::request_minimal();
+async fn send_arp_reply(arp_req: Arp) -> anyhow::Result<()> {
+    let mut arp_reply = Arp::minimal();
 
     // Set ethernet header.
     arp_reply.ethernet_header.destination_mac_address = arp_req.ethernet_header.source_mac_address;
-    arp_reply.ethernet_header.source_mac_address = *MY_MAC_ADDRESS;
 
     // Set arp payload.
     arp_reply.opcode = ArpOpCode::Reply as u16;
-    arp_reply.sender_mac_address = *MY_MAC_ADDRESS;
-    arp_reply.sender_ip_address = MY_IP_ADDRESS;
     arp_reply.target_mac_address = arp_req.sender_mac_address;
     arp_reply.target_ip_address = arp_req.sender_ip_address;
 
     // Todo.
     // Sender IP, Sender MAC を MAC アドレステーブルにいれる。
 
-    arp_reply.to_ethernet_frame().send().await.unwrap();
+    arp_reply.to_ethernet_frame().send().await?;
     log::trace!("Sent an Arp reply: {arp_reply:?}");
+    Ok(())
 }
 
-pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
-    let arp_receive2 = arp_receive.resubscribe();
-    *ARP_RECEIVER.lock().await = Some(arp_receive2);
+pub async fn arp_handler() -> anyhow::Result<()> {
+    log::info!("Spawned ARP handler.");
+    let mut arp_receive = ARP_RECEIVER.read().1.resubscribe();
 
     // ARP Reply を通知するためのチャネル.
     let arp_reply_sender = ARP_REPLY_NOTIFIER.read().0.clone();
@@ -171,7 +163,7 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
                 if arp.target_ip_address == MY_IP_ADDRESS {
                     // Send an arp reply.
                     log::trace!("Get arp request");
-                    send_arp_reply(arp).await;
+                    send_arp_reply(arp).await?;
                 }
             }
 
@@ -181,7 +173,7 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
                     .write()
                     .insert(arp.get_sender_ip_address(), arp.sender_mac_address);
                 // Arp 解決を待っている人に通知する。
-                arp_reply_sender.send(()).unwrap();
+                arp_reply_sender.send(())?;
             }
 
             ArpOpCode::Invalid => {
@@ -195,6 +187,7 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
 }
 
 pub async fn resolve_arp(ip: Ipv4Addr) -> anyhow::Result<[u8; 6]> {
+    log::trace!("Resolving IP: {ip}");
     let mut arp_reply_notifier = ARP_REPLY_NOTIFIER.read().1.resubscribe();
 
     for count in 0..ARP_RESOLVE_LOOP_COUNT_THRESHOULD {
@@ -206,8 +199,7 @@ pub async fn resolve_arp(ip: Ipv4Addr) -> anyhow::Result<[u8; 6]> {
             .await
             .to_ethernet_frame()
             .send()
-            .await
-            .unwrap();
+            .await?;
         let timeout_ms = 8 << count;
         match timeout(Duration::from_millis(timeout_ms), arp_reply_notifier.recv()).await {
             Ok(_) => {} // We get an arp reply. Thre value can be got in next loop.
@@ -215,10 +207,7 @@ pub async fn resolve_arp(ip: Ipv4Addr) -> anyhow::Result<[u8; 6]> {
         };
         log::warn!("IP {ip} did not respond in {timeout_ms} ms. Retrying..")
     }
-    let error_msg = format!(
-        "[resolve_arp] Exceeded loop count threshould during ARP resolving IP {:?}",
-        ip
-    );
+    let error_msg = format!("Exceeded loop count threshould in resolve_arp for {ip:?}");
     log::warn!("{error_msg}");
     anyhow::bail!(error_msg);
 }
