@@ -13,7 +13,8 @@ pub static ICMP_REPLY_NOTIFIER: Lazy<
         broadcast::Receiver<Ipv4Packet>,
     )>,
 > = Lazy::new(|| {
-    let (icmp_notifier_sender, icmp_notifier_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    let (icmp_notifier_sender, icmp_notifier_receiver) =
+        broadcast::channel::<Ipv4Packet>(crate::common::BUFFER_SIZE_DEFAULT);
     RwLock::new((icmp_notifier_sender, icmp_notifier_receiver))
 });
 
@@ -23,7 +24,8 @@ pub static ICMP_CHANNEL: Lazy<
         broadcast::Receiver<Ipv4Packet>,
     )>,
 > = Lazy::new(|| {
-    let (icmp_ch_sender, icmp_ch_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    let (icmp_ch_sender, icmp_ch_receiver) =
+        broadcast::channel::<Ipv4Packet>(crate::common::BUFFER_SIZE_DEFAULT);
     RwLock::new((icmp_ch_sender, icmp_ch_receiver))
 });
 

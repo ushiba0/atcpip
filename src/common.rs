@@ -1,3 +1,5 @@
+pub const BUFFER_SIZE_DEFAULT: usize = 4;
+
 #[macro_export]
 macro_rules! unwrap_or_yield {
     ($global_var:expr, $method:ident) => {

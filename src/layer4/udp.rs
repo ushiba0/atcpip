@@ -17,7 +17,8 @@ pub static UDP_CHANNEL: Lazy<
         broadcast::Receiver<Ipv4Packet>,
     )>,
 > = Lazy::new(|| {
-    let (udp_ch_sender, udp_ch_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    let (udp_ch_sender, udp_ch_receiver) =
+        broadcast::channel::<Ipv4Packet>(crate::common::BUFFER_SIZE_DEFAULT);
     RwLock::new((udp_ch_sender, udp_ch_receiver))
 });
 
@@ -97,7 +98,8 @@ impl UdpSocket {
         let mut portmap = PORT_MAP.write();
         ensure!(portmap.get(&port).is_none(), "Address already in use.");
 
-        let (rx_sender, rx_receiver) = mpsc::channel::<(SocketAddr, Bytes)>(2);
+        let (rx_sender, rx_receiver) =
+            mpsc::channel::<(SocketAddr, Bytes)>(crate::common::BUFFER_SIZE_DEFAULT);
         portmap.insert(port, rx_sender);
 
         log::info!("Listening UDP on port {port}.");

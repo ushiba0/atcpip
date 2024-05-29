@@ -21,7 +21,8 @@ pub static IPV4_RECEIVER: Lazy<
         broadcast::Receiver<Ipv4Packet>,
     )>,
 > = Lazy::new(|| {
-    let (ipv4_rx_sender, ipv4_rx_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    let (ipv4_rx_sender, ipv4_rx_receiver) =
+        broadcast::channel::<Ipv4Packet>(crate::common::BUFFER_SIZE_DEFAULT);
     RwLock::new((ipv4_rx_sender, ipv4_rx_receiver))
 });
 

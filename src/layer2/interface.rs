@@ -22,7 +22,7 @@ pub static MY_MAC_ADDRESS: Lazy<[u8; 6]> = Lazy::new(|| {
     mac
 });
 
-static SEND_HANDLE2: Lazy<
+static DL_TX_CHANNEL: Lazy<
     parking_lot::RwLock<(
         broadcast::Sender<EthernetFrame>,
         broadcast::Receiver<EthernetFrame>,
@@ -41,7 +41,7 @@ pub const INTERFACE_NAME: &str = "ens192";
 const PNET_TX_TIMEOUT_MICROSEC: u64 = 1000 * 10; // 10 ms.
 const PNET_RX_TIMEOUT_MICROSEC: u64 = 1000; // 1 ms
 
-const BUFFER_SIZE_DATALINK_SEND_CHANNEL: usize = 8;
+const BUFFER_SIZE_DATALINK_SEND_CHANNEL: usize = 4;
 const BUFFER_SIZE_ETH_SEND_CHANNEL: usize = 2;
 
 async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
@@ -74,7 +74,7 @@ async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkRecei
 }
 
 pub async fn send_to_pnet(ethernet_frame: EthernetFrame) -> Result<usize> {
-    SEND_HANDLE2
+    DL_TX_CHANNEL
         .read()
         .borrow()
         .0
@@ -89,7 +89,9 @@ pub async fn spawn_tx_handler() {
         mpsc::channel::<EthernetFrame>(BUFFER_SIZE_ETH_SEND_CHANNEL);
     // Spawn esthernet handler.
     tokio::spawn(async move {
-        super::ethernet::ethernet_handler(eth_rx_receiver).await.unwrap();
+        super::ethernet::ethernet_handler(eth_rx_receiver)
+            .await
+            .unwrap();
     });
 
     // Spawn datalink Rx handler.
@@ -124,13 +126,13 @@ async fn datalink_rx_handler(
 
 async fn datalink_tx_handler(mut tx: Box<dyn DataLinkSender>) -> Result<()> {
     log::info!("Spawned Datalink Tx handler.");
-    let mut iface_recv = SEND_HANDLE2.read().borrow().1.resubscribe();
+    let mut iface_recv = DL_TX_CHANNEL.read().borrow().1.resubscribe();
 
     loop {
         let eth_frame = match iface_recv.recv().await {
             Ok(v) => v,
             Err(e) => {
-                log::error!("[datalink_tx_handler] {e:?}");
+                log::error!("[datalink_tx_handler](1) {e:?}");
                 continue;
             }
         };
@@ -139,9 +141,9 @@ async fn datalink_tx_handler(mut tx: Box<dyn DataLinkSender>) -> Result<()> {
         match res {
             Ok(v) => match v {
                 Ok(_) => {}
-                Err(e) => log::error!("[datalink_tx_handler] {e:?}"),
+                Err(e) => log::error!("[datalink_tx_handler](2) {e:?}"),
             },
-            Err(e) => log::error!("[datalink_tx_handler] {e:?}"),
+            Err(e) => log::error!("[datalink_tx_handler](3) {e:?}"),
         }
     }
 }
