@@ -54,7 +54,10 @@ fn concatenate_ranges(ranges: &[Range<usize>]) -> anyhow::Result<Range<usize>> {
     let mut sorted_ranges = ranges.to_owned();
     sorted_ranges.sort_by_key(|r| r.start);
 
-    ensure!(sorted_ranges.first().context("Empty.")?.start == 0, "Range start != 0.");
+    ensure!(
+        sorted_ranges.first().context("Empty.")?.start == 0,
+        "Range start != 0."
+    );
 
     let mut current_end = 0;
     for range in ranges.iter() {

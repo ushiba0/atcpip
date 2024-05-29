@@ -77,7 +77,7 @@ async fn icmp_echo_reply_listener_with_timeout(
 ) {
     log::trace!("Listening ICMP Echo Reply with id:{identifier}, seq:{seqence_number}, timeout:{timeout_ms}");
     let res = timeout(Duration::from_millis(timeout_ms), async {
-        let mut icmp_notifier_receiver = crate::unwrap_or_yield!(ICMP_REPLY_NOTIFIER, resubscribe);
+        let mut icmp_notifier_receiver = ICMP_REPLY_NOTIFIER.read().1.resubscribe();
         loop {
             let ipv4frame = icmp_notifier_receiver.recv().await.unwrap();
             let icmp = Icmp::from_buffer(&ipv4frame.get_payload());

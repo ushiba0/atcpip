@@ -1,8 +1,8 @@
 use bytes::{Bytes, BytesMut};
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use tokio::sync::broadcast::{self, Receiver};
-use tokio::sync::Mutex;
 
 use crate::common::calc_checksum;
 use crate::layer3::ipv4::Ipv4Packet;
@@ -123,16 +123,24 @@ async fn send_icmp_echo_reply(
     Ok(())
 }
 
-pub static ICMP_REPLY_NOTIFIER: Lazy<Mutex<Option<Receiver<Ipv4Packet>>>> =
-    Lazy::new(Default::default);
+pub static ICMP_REPLY_NOTIFIER: Lazy<
+    parking_lot::RwLock<(
+        broadcast::Sender<Ipv4Packet>,
+        broadcast::Receiver<Ipv4Packet>,
+    )>,
+> = Lazy::new(|| {
+    let (icmp_notifier_sender, icmp_notifier_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    RwLock::new((icmp_notifier_sender, icmp_notifier_receiver))
+});
 
 pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Packet>) {
     // 必要にであれば icmp_receive をクローンして Global 変数として保存する。
     // いまは必要ないためそうしていない。
 
     // ICMP の受信を通知するためのチャネル.
-    let (icmp_notifier_sender, icmp_notifier_receiver) = broadcast::channel::<Ipv4Packet>(2);
-    *ICMP_REPLY_NOTIFIER.lock().await = Some(icmp_notifier_receiver);
+    // let (icmp_notifier_sender, icmp_notifier_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    // *ICMP_REPLY_NOTIFIER.lock().await = Some(icmp_notifier_receiver);
+    let icmp_notifier_sender = ICMP_REPLY_NOTIFIER.read().0.clone();
 
     loop {
         let ipv4frame = icmp_receive.recv().await.unwrap();

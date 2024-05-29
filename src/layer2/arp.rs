@@ -5,6 +5,7 @@ use bytes::Bytes;
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 
+use parking_lot::RwLock;
 use tokio::sync::broadcast::{self, Receiver};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
@@ -12,8 +13,7 @@ use tokio::time::{timeout, Duration};
 use crate::layer2::ethernet::{EtherType, EthernetFrame, EthernetHeader};
 use crate::layer2::interface::{MY_IP_ADDRESS, MY_MAC_ADDRESS};
 
-// static ARP_TABLE: Lazy<Mutex<HashMap<[u8; 4], [u8; 6]>>> = Lazy::new(Default::default);
-static ARP_TABLEV2: Lazy<parking_lot::RwLock<HashMap<Ipv4Addr, [u8; 6]>>> =
+static ARP_TABLE: Lazy<parking_lot::RwLock<HashMap<Ipv4Addr, [u8; 6]>>> =
     Lazy::new(Default::default);
 
 const ARP_RESOLVE_LOOP_COUNT_THRESHOULD: usize = 20;
@@ -116,7 +116,17 @@ impl Arp {
 }
 
 pub static ARP_RECEIVER: Lazy<Mutex<Option<Receiver<Arp>>>> = Lazy::new(Default::default);
-pub static ARP_REPLY_NOTIFIER: Lazy<Mutex<Option<Receiver<bool>>>> = Lazy::new(Default::default);
+
+pub static ARP_REPLY_NOTIFIER: Lazy<
+    parking_lot::RwLock<(
+        broadcast::Sender<()>,
+        broadcast::Receiver<()>,
+    )>,
+> = Lazy::new(|| {
+    let (arp_reply_sender, arp_reply_receiver) =
+        broadcast::channel::<()>(2);
+    RwLock::new((arp_reply_sender, arp_reply_receiver))
+});
 
 async fn send_arp_reply(arp_req: Arp) {
     let mut arp_reply = Arp::request_minimal();
@@ -144,8 +154,7 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
     *ARP_RECEIVER.lock().await = Some(arp_receive2);
 
     // ARP Reply を通知するためのチャネル.
-    let (arp_reply_sender, arp_reply_receiver) = broadcast::channel::<bool>(2);
-    *ARP_REPLY_NOTIFIER.lock().await = Some(arp_reply_receiver);
+    let arp_reply_sender = ARP_REPLY_NOTIFIER.read().0.clone();
 
     loop {
         let arp = match arp_receive.recv().await {
@@ -168,11 +177,11 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
 
             ArpOpCode::Reply => {
                 log::trace!("ARP Reply: {arp:x?}");
-                ARP_TABLEV2
+                ARP_TABLE
                     .write()
                     .insert(arp.get_sender_ip_address(), arp.sender_mac_address);
                 // Arp 解決を待っている人に通知する。
-                arp_reply_sender.send(true).unwrap();
+                arp_reply_sender.send(()).unwrap();
             }
 
             ArpOpCode::Invalid => {
@@ -186,10 +195,10 @@ pub async fn arp_handler(mut arp_receive: Receiver<Arp>) {
 }
 
 pub async fn resolve_arp(ip: Ipv4Addr) -> anyhow::Result<[u8; 6]> {
-    let mut arp_reply_notifier = crate::unwrap_or_yield!(ARP_REPLY_NOTIFIER, resubscribe);
+    let mut arp_reply_notifier = ARP_REPLY_NOTIFIER.read().1.resubscribe();
 
     for count in 0..ARP_RESOLVE_LOOP_COUNT_THRESHOULD {
-        if let Some(&mac) = ARP_TABLEV2.read().get(&ip) {
+        if let Some(&mac) = ARP_TABLE.read().get(&ip) {
             return Ok(mac);
         }
         log::trace!("Sending ARP reqest for {ip}");
