@@ -2,10 +2,30 @@ use bytes::{Bytes, BytesMut};
 use num_traits::FromPrimitive;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
-use tokio::sync::broadcast::{self, Receiver};
+use tokio::sync::broadcast;
 
 use crate::common::calc_checksum;
 use crate::layer3::ipv4::Ipv4Packet;
+
+pub static ICMP_REPLY_NOTIFIER: Lazy<
+    parking_lot::RwLock<(
+        broadcast::Sender<Ipv4Packet>,
+        broadcast::Receiver<Ipv4Packet>,
+    )>,
+> = Lazy::new(|| {
+    let (icmp_notifier_sender, icmp_notifier_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    RwLock::new((icmp_notifier_sender, icmp_notifier_receiver))
+});
+
+pub static ICMP_CHANNEL: Lazy<
+    parking_lot::RwLock<(
+        broadcast::Sender<Ipv4Packet>,
+        broadcast::Receiver<Ipv4Packet>,
+    )>,
+> = Lazy::new(|| {
+    let (icmp_ch_sender, icmp_ch_receiver) = broadcast::channel::<Ipv4Packet>(2);
+    RwLock::new((icmp_ch_sender, icmp_ch_receiver))
+});
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u8)]
@@ -82,15 +102,15 @@ impl Icmp {
         calc_checksum(&self.to_bytes_inner())
     }
 
-    pub fn from_buffer(buf: &[u8]) -> Self {
-        Self {
+    pub fn from_buffer(buf: &[u8]) ->anyhow::Result <Self> {
+        Ok(Self {
             icmp_type: buf[0],
             code: buf[1],
-            _checksum: u16::from_be_bytes(buf[2..4].try_into().unwrap()),
-            identifier: u16::from_be_bytes(buf[4..6].try_into().unwrap()),
-            sequence_number: u16::from_be_bytes(buf[6..8].try_into().unwrap()),
+            _checksum: u16::from_be_bytes(buf[2..4].try_into()?),
+            identifier: u16::from_be_bytes(buf[4..6].try_into()?),
+            sequence_number: u16::from_be_bytes(buf[6..8].try_into()?),
             data: Bytes::copy_from_slice(&buf[8..]),
-        }
+        })
     }
 
     pub fn to_ipv4(&self, ip: [u8; 4]) -> anyhow::Result<super::ipv4::Ipv4FrameUnchecked> {
@@ -123,28 +143,15 @@ async fn send_icmp_echo_reply(
     Ok(())
 }
 
-pub static ICMP_REPLY_NOTIFIER: Lazy<
-    parking_lot::RwLock<(
-        broadcast::Sender<Ipv4Packet>,
-        broadcast::Receiver<Ipv4Packet>,
-    )>,
-> = Lazy::new(|| {
-    let (icmp_notifier_sender, icmp_notifier_receiver) = broadcast::channel::<Ipv4Packet>(2);
-    RwLock::new((icmp_notifier_sender, icmp_notifier_receiver))
-});
-
-pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Packet>) {
-    // 必要にであれば icmp_receive をクローンして Global 変数として保存する。
-    // いまは必要ないためそうしていない。
+pub async fn icmp_handler() -> anyhow::Result<()> {
+    let mut icmp_receive = ICMP_CHANNEL.read().1.resubscribe();
 
     // ICMP の受信を通知するためのチャネル.
-    // let (icmp_notifier_sender, icmp_notifier_receiver) = broadcast::channel::<Ipv4Packet>(2);
-    // *ICMP_REPLY_NOTIFIER.lock().await = Some(icmp_notifier_receiver);
     let icmp_notifier_sender = ICMP_REPLY_NOTIFIER.read().0.clone();
 
     loop {
-        let ipv4frame = icmp_receive.recv().await.unwrap();
-        let icmp = Icmp::from_buffer(&ipv4frame.get_payload());
+        let ipv4frame = icmp_receive.recv().await?;
+        let icmp = Icmp::from_buffer(&ipv4frame.get_payload())?;
 
         // Checksum の計算
         if icmp.get_checksum() != 0 {
@@ -158,11 +165,11 @@ pub async fn icmp_handler(mut icmp_receive: Receiver<Ipv4Packet>) {
         match icmp_type {
             IcmpType::Reply => {
                 log::trace!("ICMP Reply Received. : {:x?}", icmp);
-                icmp_notifier_sender.send(ipv4frame.clone()).unwrap();
+                icmp_notifier_sender.send(ipv4frame.clone())?;
             }
             IcmpType::Request => {
                 log::trace!("ICMP Echo Reqest.");
-                send_icmp_echo_reply(ipv4frame, icmp).await.unwrap();
+                send_icmp_echo_reply(ipv4frame, icmp).await?;
             }
             _ => {
                 log::warn!("Uninplemented.");

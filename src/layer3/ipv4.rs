@@ -171,12 +171,11 @@ impl Ipv4PacketUnverified {
 pub async fn ipv4_handler() {
     log::info!("Spawned IPv4 handler.");
     let mut ipv4_receive = IPV4_RECEIVER.read().1.resubscribe();
+    let icmp_rx_sender = crate::layer3::icmp::ICMP_CHANNEL.read().0.clone();
 
-    // ICMP の襲来を通知するチャネル.
-    let (icmp_rx_sender, icmp_rx_receiver) = broadcast::channel::<Ipv4Packet>(2);
     // Spawn ICMP handler.
     tokio::spawn(async move {
-        super::icmp::icmp_handler(icmp_rx_receiver).await;
+        super::icmp::icmp_handler().await.unwrap();
     });
 
     // UDP の受信を通知するチャネル.
