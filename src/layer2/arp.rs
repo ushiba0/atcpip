@@ -111,8 +111,7 @@ impl Arp {
     }
 
     fn get_sender_ip_address(&self) -> Ipv4Addr {
-        let s = self.sender_ip_address;
-        Ipv4Addr::new(s[0], s[1], s[2], s[3])
+        self.sender_ip_address.into()
     }
 }
 

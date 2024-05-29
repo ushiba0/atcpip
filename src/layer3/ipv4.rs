@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use rand::Rng;
 
 use tokio::sync::broadcast::{self, Receiver};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::common::calc_checksum;
@@ -161,7 +161,7 @@ impl Ipv4PacketUnverified {
     }
 }
 
-static IPV4_RECEIVER2: Lazy<parking_lot::RwLock<Option<broadcast::Receiver<Ipv4Packet>>>> =
+static IPV4_RECEIVER2: Lazy<RwLock<Option<broadcast::Receiver<Ipv4Packet>>>> =
     Lazy::new(Default::default);
 
 pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Packet>) {
@@ -204,7 +204,7 @@ pub async fn ipv4_handler(mut ipv4_receive: Receiver<Ipv4Packet>) {
         let ipv4frame = match reassemble_ipv4::reassemble(&mut tmp_pool, &ipv4frame) {
             Ok(v) => v,
             Err(e) => {
-                log::warn!("IPv4 packet reassemble failed. {e:?}");
+                log::trace!("IPv4 packet reassemble failed. {e:?}");
                 continue;
             }
         };

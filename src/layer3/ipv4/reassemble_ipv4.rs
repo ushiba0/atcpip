@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use anyhow::{bail, Context};
+use anyhow::{ensure, Context};
 use bytes::{Bytes, BytesMut};
 
 use super::Ipv4Packet;
@@ -20,9 +20,7 @@ pub fn reassemble(
 
     // MF==true のパケットの場合は return する。
     // 現在の実装では MF==false のパケットが来ない限り rebuild しない。
-    if ipv4_frame.get_fragment_mf_bit() {
-        bail!("MF==true なのでリアセンブルしない。");
-    }
+    ensure!(!ipv4_frame.get_fragment_mf_bit(), "MF==true");
 
     // MF==false のパケットを受け取ったら即 pool から廃棄する。
     let packets = tmp_pool
@@ -40,8 +38,8 @@ pub fn reassemble(
         concatenated_payload[range].copy_from_slice(&packet.get_payload()[..data_size]);
     }
 
-    let merged_range_end = concatenate_ranges(&fragment_range_list)?;
-    let reassembled_payload = Bytes::copy_from_slice(&concatenated_payload[0..merged_range_end]);
+    let merged_range = concatenate_ranges(&fragment_range_list)?;
+    let reassembled_payload = Bytes::copy_from_slice(&concatenated_payload[merged_range]);
 
     let mut pkt_unverified = ipv4_frame.clone().to_unverified();
     pkt_unverified.set_payload(&reassembled_payload);
@@ -51,23 +49,18 @@ pub fn reassemble(
 
 // Range を結合し、そのサイズを返す。
 // Range に Hole や被りがあると Err を返す。
-fn concatenate_ranges(ranges: &[Range<usize>]) -> anyhow::Result<usize> {
-    // ranges を start でソート。
+fn concatenate_ranges(ranges: &[Range<usize>]) -> anyhow::Result<Range<usize>> {
+    // ranges を start でソートし、ひと繋がりの range であるか確認する。
     let mut sorted_ranges = ranges.to_owned();
     sorted_ranges.sort_by_key(|r| r.start);
 
-    if sorted_ranges.first().context("Empty.")?.start != 0 {
-        bail!("Range start is not 0.");
-    }
+    ensure!(sorted_ranges.first().context("Empty.")?.start == 0, "Range start != 0.");
 
     let mut current_end = 0;
     for range in ranges.iter() {
-        if range.start == current_end {
-            current_end = range.end;
-        } else {
-            bail!("Range has some hole.")
-        }
+        ensure!(range.start == current_end, "Range has a hole or dup.");
+        current_end = range.end;
     }
 
-    Ok(current_end)
+    Ok(0..current_end)
 }
