@@ -124,20 +124,9 @@ pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Packet) -> Result<us
     ether_frame.send().await
 }
 
-pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
-    // Datalink Rx.
-    log::info!("Spawned Ethernet Rx handler.");
-
+async fn ethernet_handler_inner(mut receiver: Receiver<EthernetFrame>) -> anyhow::Result<()> {
     let arp_rx_sender = crate::layer2::arp::ARP_RECEIVER.read().0.clone();
     let ipv4_rx_sender = crate::layer3::ipv4::IPV4_RECEIVER.read().0.clone();
-
-    tokio::spawn(async move {
-        crate::layer2::arp::arp_handler().await.unwrap();
-    });
-
-    tokio::spawn(async move {
-        crate::layer3::ipv4::ipv4_handler().await.unwrap();
-    });
 
     loop {
         tokio::task::yield_now().await;
@@ -147,17 +136,28 @@ pub async fn ethernet_handler(mut receiver: Receiver<EthernetFrame>) {
             // EtherType を見て Arp handler, IPv4 handler に渡す。
             match EtherType::from_u16(eth_frame.header.ethernet_type).unwrap_or_default() {
                 EtherType::Arp => {
-                    let arp = eth_frame.to_arp().unwrap();
-                    arp_rx_sender.send(arp).unwrap();
+                    let arp = eth_frame.to_arp()?;
+                    arp_rx_sender.send(arp)?;
                 }
                 EtherType::Ipv4 => {
                     let ipv4frame = Ipv4Packet::from_bytes(&eth_frame.payload);
-                    ipv4_rx_sender.send(ipv4frame).unwrap();
+                    ipv4_rx_sender.send(ipv4frame)?;
                 }
                 _ => {}
             }
         } else {
             // Timed out.
         }
+    }
+}
+
+pub async fn ethernet_handler(receiver: Receiver<EthernetFrame>) -> anyhow::Result<()> {
+    // Datalink Rx.
+    log::info!("Spawned Ethernet Rx handler.");
+
+    tokio::select! {
+        val = crate::layer2::arp::arp_handler() =>{ val }
+        val = crate::layer3::ipv4::ipv4_handler() => { val }
+        val = ethernet_handler_inner(receiver) => { val }
     }
 }

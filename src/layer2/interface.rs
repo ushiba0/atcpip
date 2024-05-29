@@ -89,7 +89,7 @@ pub async fn spawn_tx_handler() {
         mpsc::channel::<EthernetFrame>(BUFFER_SIZE_ETH_SEND_CHANNEL);
     // Spawn esthernet handler.
     tokio::spawn(async move {
-        super::ethernet::ethernet_handler(eth_rx_receiver).await;
+        super::ethernet::ethernet_handler(eth_rx_receiver).await.unwrap();
     });
 
     // Spawn datalink Rx handler.
