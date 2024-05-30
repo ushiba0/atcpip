@@ -16,6 +16,7 @@ macro_rules! unwrap_or_yield {
 #[macro_export]
 macro_rules! impl_get {
     ($name:ident, $field:ident, $start:expr, $end:expr, $type:ty) => {
+        #[allow(dead_code)]
         pub fn $name(&self) -> $type {
             let bytes: &[u8] = &self.$field[$start..$end];
             <$type>::from_be_bytes(bytes.try_into().unwrap())
@@ -26,6 +27,7 @@ macro_rules! impl_get {
 #[macro_export]
 macro_rules! impl_get_slice {
     ($name:ident, $field:ident, $start:expr, $end:expr, $type:ty) => {
+        #[allow(dead_code)]
         pub fn $name(&self) -> $type {
             self.$field[$start..$end].try_into().unwrap()
         }
@@ -35,6 +37,7 @@ macro_rules! impl_get_slice {
 #[macro_export]
 macro_rules! impl_get_bit {
     ($fn_name:ident, $var:ident, $byte_idx:expr, $bit_idx:expr) => {
+        #[allow(dead_code)]
         pub fn $fn_name(&self) -> bool {
             self.$var[$byte_idx].get_bit($bit_idx)
         }
@@ -44,6 +47,7 @@ macro_rules! impl_get_bit {
 #[macro_export]
 macro_rules! impl_set {
     ($name:ident, $field:ident, $start:expr, $end:expr, $type:ty) => {
+        #[allow(dead_code)]
         pub fn $name(&mut self, value: $type) -> &mut Self {
             self.$field[$start..$end].copy_from_slice(&value.to_be_bytes());
             self
@@ -54,6 +58,7 @@ macro_rules! impl_set {
 #[macro_export]
 macro_rules! impl_set_slice {
     ($name:ident, $field:ident, $start:expr, $end:expr, $type:ty) => {
+        #[allow(dead_code)]
         pub fn $name(&mut self, value: $type) -> &mut Self {
             self.$field[$start..$end].copy_from_slice(&value);
             self
@@ -64,6 +69,7 @@ macro_rules! impl_set_slice {
 #[macro_export]
 macro_rules! impl_set_bit {
     ($fn_name:ident, $var:ident, $byte_idx:expr, $bit_idx:expr) => {
+        #[allow(dead_code)]
         pub fn $fn_name(&mut self, value: bool) -> &mut Self {
             self.$var[$byte_idx].set_bit($bit_idx, value);
             self

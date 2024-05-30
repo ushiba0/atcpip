@@ -93,7 +93,7 @@ impl TcpPacketMut {
 
     // Input: 4 bit data. Number of words.
     fn set_header_length_raw(&mut self, value: u8) -> &mut Self {
-        debug_assert!(5 <= value && value <= 15, "Invalid TCP header len: {value}");
+        debug_assert!((5..=15).contains(&value), "Invalid TCP header len: {value}");
         self.bytes[12].set_bits(4..8, value & 0b1111);
         self
     }
@@ -113,8 +113,7 @@ impl TcpPacketMut {
         bm.put_u16(self.bytes.len() as u16); // Packet length.
         bm.put(self.bytes.clone());
         let b = bm.freeze();
-        let checksum = crate::common::calc_checksum(&b);
-        checksum
+        crate::common::calc_checksum(&b)
     }
 
     pub fn calc_and_set_checksum(&mut self) -> &mut Self {

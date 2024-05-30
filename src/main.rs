@@ -1,3 +1,4 @@
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use std::net::Ipv4Addr;
@@ -6,6 +7,7 @@ mod arping;
 mod common;
 mod pingcmd;
 mod syn_flood_attack;
+mod tokio_tcp_server;
 mod udp_echo;
 mod udp_echo_verify;
 
@@ -45,6 +47,8 @@ enum SecondCommand {
     /// TCP SYN Flood attack.
     /// !!!!Warning!!!! This is only for testing and learning purposes.
     SynFloodAttack(AddrAndPort),
+    /// Tokio TCP Server.
+    TokioTcpServer,
     /// UDP echo Server.
     UdpEchoServer(UdpEchoOpts),
     /// UDP echo veririer.
@@ -113,64 +117,51 @@ async fn main() -> anyhow::Result<()> {
 
     crate::layer2::interface::spawn_tx_handler().await;
 
-    let handle = match cli_cmds.second_command {
-        SecondCommand::Arping(opts) => {
-            let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
-            log::info!("Destination IP Address: {ip:?}");
-            tokio::spawn(async move { crate::arping::main(ip).await })
-        }
-        SecondCommand::Ping(opts) => {
-            let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
-            log::info!("Destination IP Address: {ip:?}");
-            tokio::spawn(async move {
+    let cmd_handle = tokio::spawn(async move {
+        match cli_cmds.second_command {
+            SecondCommand::Arping(opts) => {
+                let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
+                log::info!("Destination IP Address: {ip:?}");
+                crate::arping::main(ip).await
+            }
+            SecondCommand::Ping(opts) => {
+                let ip = opts.ipv4_address.parse::<Ipv4Addr>()?;
+                log::info!("Destination IP Address: {ip:?}");
                 crate::pingcmd::main(ip, opts.count, opts.timeout_ms, opts.size).await
-            })
+            }
+            SecondCommand::Server => {
+                use tokio::time::{sleep, Duration};
+                async fn testfunc() -> anyhow::Result<()> {
+                    sleep(Duration::from_millis(1000 * 60)).await;
+                    Ok(())
+                }
+                testfunc().await
+            }
+            SecondCommand::UdpClient => unimplemented!(),
+            SecondCommand::UdpEchoServer(opts) => {
+                crate::udp_echo::main(opts.port).await
+            }
+            SecondCommand::UdpEchoVerify => {
+                crate::udp_echo_verify::main(1234).await
+            }
+            SecondCommand::SynFloodAttack(opts) => {
+                crate::syn_flood_attack::main(opts.address, opts.port).await
+            }
+            SecondCommand::TokioTcpServer => {
+                crate::tokio_tcp_server::main().await
+            }
+            _ => unimplemented!(),
         }
-        SecondCommand::Server => {
-            use tokio::time::{sleep, Duration};
-            tokio::spawn(async move {
-                sleep(Duration::from_millis(1000 * 60)).await;
-                Ok(())
-            })
-        }
-        SecondCommand::UdpClient => tokio::spawn(async { Ok(()) }),
-        SecondCommand::UdpEchoServer(opts) => {
-            tokio::spawn(async move { crate::udp_echo::main(opts.port).await })
-        }
-        SecondCommand::UdpEchoVerify => {
-            tokio::spawn(async { crate::udp_echo_verify::main(1234).await })
-        }
-        SecondCommand::SynFloodAttack(opts) => {
-            tokio::spawn(
-                async move { crate::syn_flood_attack::main(opts.address, opts.port).await },
-            )
-        }
-        _ => unimplemented!(),
-    };
+    });
+
 
     tokio::spawn(async move {
-        match handle.await {
-            Ok(inner) => match inner {
-                // タスク、コマンドともに正常終了.
-                Ok(a) => log::info!("Ok: {a:?}"),
-                // タスクは正常終了したが、タスクの戻り値がエラー。
-                Err(e) => log::error!("{e:?}"),
-            },
-            //コマンドを実行したタスクが panic したか、またはランタイムのシャットダウンでタスクが強制終了した。
-            Err(e) => log::error!("Task end with error: {e:?}"),
+        match cmd_handle.await {
+            Ok(_) => log::info!("Ok"),
+            Err(e) => log::error!("Command end with error: {e:?}"),
         }
         std::process::exit(0);
     });
 
-    // Call a shutdown handler,
-    match tokio::signal::ctrl_c().await {
-        Ok(()) => {
-            log::info!("Signal received. Graceful Shutdown.");
-            Ok(())
-        }
-        Err(err) => {
-            eprintln!("Unable to listen for shutdown signal: {}", err);
-            Err(anyhow::anyhow!("{err:?}"))
-        }
-    }
+    tokio::signal::ctrl_c().await.context("Signal handler err.")
 }
