@@ -103,11 +103,19 @@ async fn ipv4_handler_inner() -> anyhow::Result<()> {
 pub async fn ipv4_handler() -> anyhow::Result<()> {
     log::info!("Spawned IPv4 handler.");
 
-    tokio::select! {
-        val = super::icmp::icmp_handler() =>{ val }
-        val = crate::layer4::udp::udp_handler() => { val }
-        val = ipv4_handler_inner() => { val }
-    }
+    tokio::spawn(async {
+        super::icmp::icmp_handler().await.unwrap();
+    });
+
+    tokio::spawn(async {
+        crate::layer4::udp::udp_handler().await.unwrap();
+    });
+
+    tokio::spawn(async {
+        ipv4_handler_inner().await.unwrap();
+    });
+
+    Ok(())
 }
 
 pub async fn send_udp(

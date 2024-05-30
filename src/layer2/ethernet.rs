@@ -155,9 +155,14 @@ pub async fn ethernet_handler(receiver: Receiver<EthernetFrame>) -> anyhow::Resu
     // Datalink Rx.
     log::info!("Spawned Ethernet Rx handler.");
 
-    tokio::select! {
-        val = crate::layer2::arp::arp_handler() =>{ val }
-        val = crate::layer3::ipv4::ipv4_handler() => { val }
-        val = ethernet_handler_inner(receiver) => { val }
-    }
+    tokio::spawn(async {
+        crate::layer2::arp::arp_handler().await.unwrap();
+    });
+
+    tokio::spawn(async {
+        crate::layer3::ipv4::ipv4_handler().await.unwrap();
+    });
+
+    tokio::spawn(async { ethernet_handler_inner(receiver).await.unwrap() });
+    Ok(())
 }

@@ -41,8 +41,8 @@ pub const INTERFACE_NAME: &str = "ens192";
 const PNET_TX_TIMEOUT_MICROSEC: u64 = 1000 * 10; // 10 ms.
 const PNET_RX_TIMEOUT_MICROSEC: u64 = 1000; // 1 ms
 
-const BUFFER_SIZE_DATALINK_SEND_CHANNEL: usize = 32;
-const BUFFER_SIZE_ETH_SEND_CHANNEL: usize = 32;
+const BUFFER_SIZE_DATALINK_SEND_CHANNEL: usize = 320;
+const BUFFER_SIZE_ETH_SEND_CHANNEL: usize = 320;
 
 async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
     let interfaces = pnet::datalink::interfaces();
