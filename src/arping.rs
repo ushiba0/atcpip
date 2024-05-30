@@ -17,7 +17,8 @@ async fn wait_arp_reply() -> anyhow::Result<()> {
 
 pub async fn main(ip: Ipv4Addr) -> anyhow::Result<()> {
     let mut req = crate::layer2::arp::Arp::minimal();
-    req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    req.ethernet_header
+        .set_destination_mac_address([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
     req.target_ip_address = ip.octets();
     req.opcode = crate::layer2::arp::ArpOpCode::Request as u16;
 

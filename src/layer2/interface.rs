@@ -53,9 +53,6 @@ async fn get_channel() -> Result<(Box<dyn DataLinkSender>, Box<dyn DataLinkRecei
         .find(|e| e.name == INTERFACE_NAME)
         .context("Interface not found.")?;
 
-    // let mac = interface.mac.context("MAC address is not set.")?.octets();
-    // *MY_MAC_ADDRESS.lock().await = Some(mac);
-
     use std::time::Duration;
     let config = Config {
         read_timeout: Some(Duration::from_micros(PNET_RX_TIMEOUT_MICROSEC)),
@@ -111,10 +108,10 @@ async fn datalink_rx_handler(
 ) -> Result<()> {
     log::info!("Spawned Datalink Rx handler.");
     loop {
-        // rx.next() は blocking なメソッドなので yield しなければならない。
+        // Since rx.next() is a blocking method, we must yield here.
         tokio::task::yield_now().await;
-        // rx.next() はパケットが届かない場合は PNET_RX_TIMEOUT_MICROSEC ms で timeout する。
-        // 逆にここで PNET_RX_TIMEOUT_MICROSEC ms のブロックが発生する可能性がある。
+        // If no packet arrives, rx.next() will timeout after PNET_RX_TIMEOUT_MICROSEC ms.
+        // In other words, there is a possibility of a PNET_RX_TIMEOUT_MICROSEC ms block occurring here.
         if let Ok(buf) = rx.next() {
             let eth_frame = EthernetFrame::from_slice(buf);
             eth_sender.send(eth_frame).await?;
@@ -136,7 +133,7 @@ async fn datalink_tx_handler(mut tx: Box<dyn DataLinkSender>) -> Result<()> {
                 continue;
             }
         };
-        let bytes = eth_frame.build_to_packet();
+        let bytes = eth_frame.to_bytes();
         let res = tx.send_to(&bytes, None).context("None.");
         match res {
             Ok(v) => match v {

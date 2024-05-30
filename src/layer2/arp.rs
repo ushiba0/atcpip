@@ -73,12 +73,14 @@ impl Arp {
     }
 
     pub fn minimal() -> Self {
+        let header = EthernetHeader::new(&[0, 0, 0, 0, 0, 0], &*MY_MAC_ADDRESS, EtherType::Arp);
         Self {
-            ethernet_header: EthernetHeader {
-                ethernet_type: EtherType::Arp as u16,
-                source_mac_address: *MY_MAC_ADDRESS,
-                ..Default::default()
-            },
+            ethernet_header: header,
+            // EthernetHeader {
+            //     ethernet_type: EtherType::Arp as u16,
+            //     source_mac_address: *MY_MAC_ADDRESS,
+            //     ..Default::default()
+            // },
             hardware_type: 0x0001,
             protcol_type: 0x0800,
             hardware_address_length: 0x06,
@@ -110,7 +112,8 @@ impl Arp {
 
     async fn new_arp_request_packet(ip: Ipv4Addr) -> Self {
         let mut req = Arp::minimal();
-        req.ethernet_header.destination_mac_address = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        req.ethernet_header
+            .set_destination_mac_address([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
         req.target_mac_address = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         req.target_ip_address = ip.octets();
         req.opcode = ArpOpCode::Request as u16;
@@ -126,7 +129,9 @@ async fn send_arp_reply(arp_req: Arp) -> anyhow::Result<()> {
     let mut arp_reply = Arp::minimal();
 
     // Set ethernet header.
-    arp_reply.ethernet_header.destination_mac_address = arp_req.ethernet_header.source_mac_address;
+    arp_reply
+        .ethernet_header
+        .set_destination_mac_address(arp_req.ethernet_header.get_source_mac_address());
 
     // Set arp payload.
     arp_reply.opcode = ArpOpCode::Reply as u16;

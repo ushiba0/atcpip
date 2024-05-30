@@ -9,6 +9,8 @@ use crate::layer2::arp::Arp;
 use crate::layer2::interface::{DEFAULT_GATEWAY_IPV4, MY_IP_ADDRESS, SUBNET_MASK};
 use crate::layer3::ipv4::Ipv4Packet;
 
+const ETHERNET_HEADER_LEN: usize = 14;
+
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[repr(u16)]
 pub enum EtherType {
@@ -20,9 +22,7 @@ pub enum EtherType {
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct EthernetHeader {
-    pub destination_mac_address: [u8; 6],
-    pub source_mac_address: [u8; 6],
-    pub ethernet_type: u16,
+    pub bytes: BytesMut,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -32,33 +32,43 @@ pub struct EthernetFrame {
 }
 
 impl EthernetHeader {
-    fn from_bytes(bytes: &[u8; 14]) -> Self {
+    pub fn new(destination: &[u8; 6], source: &[u8; 6], ether_type: EtherType) -> Self {
+        let mut bytes = BytesMut::with_capacity(ETHERNET_HEADER_LEN);
+        bytes.put_slice(destination);
+        bytes.put_slice(source);
+        bytes.put_u16(ether_type as u16);
+        Self { bytes }
+    }
+
+    fn from_bytes(bytes_arg: &BytesMut) -> Self {
         Self {
-            destination_mac_address: bytes[0..6].try_into().unwrap(),
-            source_mac_address: bytes[6..12].try_into().unwrap(),
-            ethernet_type: u16::from_be_bytes(bytes[12..14].try_into().unwrap()),
+            bytes: bytes_arg.clone(),
         }
     }
 
     fn to_bytes(&self) -> Bytes {
-        let mut bytes = BytesMut::zeroed(12);
-        bytes[0..6].copy_from_slice(&self.destination_mac_address);
-        bytes[6..12].copy_from_slice(&self.source_mac_address);
-        bytes.put_u16(self.ethernet_type);
-        debug_assert_eq!(bytes.len(), 14);
-        bytes.freeze()
+        self.bytes.clone().freeze()
     }
+
+    crate::impl_get_slice!(get_destination_mac_address, bytes, 0, 6, [u8; 6]);
+    crate::impl_get_slice!(get_source_mac_address, bytes, 6, 12, [u8; 6]);
+    crate::impl_get!(get_ethernet_type, bytes, 12, 14, u16);
+    crate::impl_set_slice!(set_destination_mac_address, bytes, 0, 6, [u8; 6]);
+    crate::impl_set_slice!(set_source_mac_address, bytes, 6, 12, [u8; 6]);
+    crate::impl_set!(set_ethernet_type, bytes, 12, 14, u16);
 }
 
 impl EthernetFrame {
     pub fn from_slice(buf: &[u8]) -> Self {
-        Self {
-            header: EthernetHeader::from_bytes(&buf[0..14].try_into().unwrap()),
-            payload: Bytes::copy_from_slice(&buf[14..]),
-        }
+        let mut bytesmut = BytesMut::new();
+        bytesmut.extend_from_slice(buf);
+        let header = bytesmut.split_to(ETHERNET_HEADER_LEN);
+        let header = EthernetHeader::from_bytes(&header);
+        let payload = bytesmut.freeze();
+        Self { header, payload }
     }
 
-    pub fn build_to_packet(&self) -> Bytes {
+    pub fn to_bytes(&self) -> Bytes {
         let mut bytes = BytesMut::new();
         bytes.put(self.header.to_bytes());
         bytes.put(self.payload.clone());
@@ -78,7 +88,7 @@ impl EthernetFrame {
     fn validate_mtu(&self) -> Result<()> {
         anyhow::ensure!(
             self.payload.len() <= super::interface::MTU,
-            "Ethernet payload ({}) exceeds MTU.",
+            "Ethernet payload ({} bytes) exceeds MTU.",
             self.payload.len()
         );
         Ok(())
@@ -105,11 +115,12 @@ async fn generate_ethernet_header(dest_ip: Ipv4Addr) -> Result<EthernetHeader> {
         // Default gateway をARP 解決する。
         crate::layer2::arp::resolve_arp(DEFAULT_GATEWAY_IPV4).await?
     };
-    Ok(EthernetHeader {
-        destination_mac_address,
-        source_mac_address: *crate::layer2::interface::MY_MAC_ADDRESS,
-        ethernet_type: EtherType::Ipv4 as u16,
-    })
+
+    Ok(EthernetHeader::new(
+        &destination_mac_address,
+        &*crate::layer2::interface::MY_MAC_ADDRESS,
+        EtherType::Ipv4,
+    ))
 }
 
 pub async fn send_ipv4(ipv4_frame: crate::layer3::ipv4::Ipv4Packet) -> Result<usize> {
@@ -129,12 +140,9 @@ async fn ethernet_handler_inner(mut receiver: Receiver<EthernetFrame>) -> anyhow
     let ipv4_rx_sender = crate::layer3::ipv4::IPV4_RECEIVER.read().0.clone();
 
     loop {
-        tokio::task::yield_now().await;
-        // rx.next() はパケットが届かない場合は PNET_RX_TIMEOUT_MICROSEC ms で timeout する。
-        // 逆にここで PNET_RX_TIMEOUT_MICROSEC ms のブロックが発生する可能性がある。
         if let Some(eth_frame) = receiver.recv().await {
             // EtherType を見て Arp handler, IPv4 handler に渡す。
-            match EtherType::from_u16(eth_frame.header.ethernet_type).unwrap_or_default() {
+            match EtherType::from_u16(eth_frame.header.get_ethernet_type()).unwrap_or_default() {
                 EtherType::Arp => {
                     let arp = eth_frame.to_arp()?;
                     arp_rx_sender.send(arp)?;

@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::ops::Range;
 
 use anyhow::{ensure, Context};
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 
 use super::Ipv4Packet;
 
@@ -23,47 +22,30 @@ pub fn reassemble(
     ensure!(!ipv4_frame.get_fragment_mf_bit(), "MF==true");
 
     // MF==false のパケットを受け取ったら即 pool から廃棄する。
-    let packets = tmp_pool
+    let mut packets = tmp_pool
         .remove(&ipv4_frame.get_identification())
         .context("No packtes.")?;
+    packets.sort_by_cached_key(|r| r.get_fragment_offset());
 
-    let mut fragment_range_list: Vec<Range<usize>> = Vec::new();
-    let mut concatenated_payload = BytesMut::zeroed(super::IPV4_MAX_PAYLOAD_SIZE);
+    ensure!(packets.first().unwrap().get_fragment_offset()==0);
+
+    let mut concatenated_payload = BytesMut::with_capacity(1500);
+    let mut prev_range_end = 0usize;
 
     for packet in packets.iter() {
         let data_size = packet.get_total_length() as usize - super::IPV4_HEADER_LEN;
         let data_offset = packet.get_fragment_offset() as usize;
         let range = data_offset..(data_offset + data_size);
-        fragment_range_list.push(range.clone());
-        concatenated_payload[range].copy_from_slice(&packet.get_payload()[..data_size]);
+        if prev_range_end == range.start {
+            concatenated_payload.put(packet.get_payload().slice(0..data_size));
+            prev_range_end = range.end;
+        } else {
+            anyhow::bail!("Hole or dup.");
+        }
     }
-
-    let merged_range = concatenate_ranges(&fragment_range_list)?;
-    let reassembled_payload = Bytes::copy_from_slice(&concatenated_payload[merged_range]);
 
     let mut pkt_unverified = ipv4_frame.clone().to_unverified();
-    pkt_unverified.set_payload(&reassembled_payload);
+    pkt_unverified.set_payload(&concatenated_payload.freeze());
 
     Ok(pkt_unverified.convert_to_ipv4packet())
-}
-
-// Range を結合し、そのサイズを返す。
-// Range に Hole や被りがあると Err を返す。
-fn concatenate_ranges(ranges: &[Range<usize>]) -> anyhow::Result<Range<usize>> {
-    // ranges を start でソートし、ひと繋がりの range であるか確認する。
-    let mut sorted_ranges = ranges.to_owned();
-    sorted_ranges.sort_by_key(|r| r.start);
-
-    ensure!(
-        sorted_ranges.first().context("Empty.")?.start == 0,
-        "Range start != 0."
-    );
-
-    let mut current_end = 0;
-    for range in ranges.iter() {
-        ensure!(range.start == current_end, "Range has a hole or dup.");
-        current_end = range.end;
-    }
-
-    Ok(0..current_end)
 }

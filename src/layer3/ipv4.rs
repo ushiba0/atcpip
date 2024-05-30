@@ -75,23 +75,29 @@ async fn ipv4_handler_inner() -> anyhow::Result<()> {
         }
 
         // Re-assemble if needed.
-        let ipv4_pkt = match reassemble_ipv4::reassemble(&mut tmp_pool, &ipv4_pkt) {
-            Ok(v) => v,
-            Err(e) => {
-                log::trace!("IPv4 packet reassemble failed. {e:?}");
-                continue;
-            }
-        };
+        let ipv4_pkt_reassembled =
+            if !ipv4_pkt.get_fragment_mf_bit() && ipv4_pkt.get_fragment_offset() == 0 {
+                ipv4_pkt
+            } else {
+                match reassemble_ipv4::reassemble(&mut tmp_pool, &ipv4_pkt) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log::trace!("IPv4 packet reassemble failed. {e:?}");
+                        continue;
+                    }
+                }
+            };
 
         // Todo:  Total length の確認。
 
-        let protcol = Ipv4Protcol::from_u8(ipv4_pkt.get_protcol_u8()).unwrap_or_default();
+        let protcol =
+            Ipv4Protcol::from_u8(ipv4_pkt_reassembled.get_protcol_u8()).unwrap_or_default();
         match protcol {
             Ipv4Protcol::Icmp => {
-                icmp_rx_sender.send(ipv4_pkt)?;
+                icmp_rx_sender.send(ipv4_pkt_reassembled)?;
             }
             Ipv4Protcol::Udp => {
-                udp_ch_sender.send(ipv4_pkt)?;
+                udp_ch_sender.send(ipv4_pkt_reassembled)?;
             }
             _ => {
                 log::warn!("Uninplemented IPv4 protcol: {protcol:?}");
