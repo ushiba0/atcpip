@@ -138,22 +138,15 @@ async fn main() -> anyhow::Result<()> {
                 testfunc().await
             }
             SecondCommand::UdpClient => unimplemented!(),
-            SecondCommand::UdpEchoServer(opts) => {
-                crate::udp_echo::main(opts.port).await
-            }
-            SecondCommand::UdpEchoVerify => {
-                crate::udp_echo_verify::main(1234).await
-            }
+            SecondCommand::UdpEchoServer(opts) => crate::udp_echo::main(opts.port).await,
+            SecondCommand::UdpEchoVerify => crate::udp_echo_verify::main(1234).await,
             SecondCommand::SynFloodAttack(opts) => {
                 crate::syn_flood_attack::main(opts.address, opts.port).await
             }
-            SecondCommand::TokioTcpServer => {
-                crate::tokio_tcp_server::main().await
-            }
+            SecondCommand::TokioTcpServer => crate::tokio_tcp_server::main().await,
             _ => unimplemented!(),
         }
     });
-
 
     tokio::spawn(async move {
         match cmd_handle.await {

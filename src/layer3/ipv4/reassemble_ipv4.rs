@@ -44,7 +44,7 @@ pub fn reassemble(
     let mut pkt_unverified = ipv4_frame.clone().to_unverified();
     pkt_unverified.set_payload(&reassembled_payload);
 
-    Ok(pkt_unverified.to_ipv4packet())
+    Ok(pkt_unverified.convert_to_ipv4packet())
 }
 
 // Range を結合し、そのサイズを返す。

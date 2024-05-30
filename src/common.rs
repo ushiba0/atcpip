@@ -1,4 +1,4 @@
-pub const BUFFER_SIZE_DEFAULT: usize = 4;
+pub const BUFFER_SIZE_DEFAULT: usize = 32;
 
 #[macro_export]
 macro_rules! unwrap_or_yield {

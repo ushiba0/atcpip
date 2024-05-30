@@ -22,6 +22,12 @@ pub static UDP_CHANNEL: Lazy<
     RwLock::new((udp_ch_sender, udp_ch_receiver))
 });
 
+// 下位のレイヤから UDP パケットが来たら、この Hashmap の Sender で送る。
+// Listen しているユーザーアプリケーションは Receiver で受け取る。
+#[allow(clippy::type_complexity)]
+pub static PORT_MAP: Lazy<parking_lot::RwLock<HashMap<u16, Sender<(SocketAddr, Bytes)>>>> =
+    Lazy::new(Default::default);
+
 const UDP_HEADER_SIZE: usize = 8;
 
 // https://datatracker.ietf.org/doc/html/rfc768
@@ -88,11 +94,6 @@ impl UdpPacketUnverified {
     }
 }
 
-// 下位のレイヤから UDP パケットが来たら、この Hashmap の Sender で送る。
-// Listen しているユーザーアプリケーションは Receiver で受け取る。
-pub static PORT_MAP: Lazy<parking_lot::RwLock<HashMap<u16, Sender<(SocketAddr, Bytes)>>>> =
-    Lazy::new(Default::default);
-
 impl UdpSocket {
     pub fn bind(_ip: Ipv4Addr, port: u16) -> anyhow::Result<Self> {
         let mut portmap = PORT_MAP.write();
@@ -142,8 +143,7 @@ pub async fn udp_handler() -> anyhow::Result<()> {
     loop {
         let ipv4_frame = receiver.recv().await.context("closed")?;
         let source_ip = ipv4_frame.get_source_address();
-        // let udp_packet = UdpPacket::from_bytes(&ipv4_frame.payload);
-        let udp_packet = UdpPacket::from_bytes(&ipv4_frame.get_payload());
+        let udp_packet = UdpPacket::from_bytes(ipv4_frame.get_payload());
 
         // Todo: Checksum の計算
         let _ = udp_packet.get_checksum();

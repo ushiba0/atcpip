@@ -115,11 +115,16 @@ impl Icmp {
         })
     }
 
-    pub fn to_ipv4(&self, ip: [u8; 4]) -> anyhow::Result<super::ipv4::Ipv4FrameUnchecked> {
-        super::ipv4::Ipv4FrameUnchecked::new()
-            .set_ipav4addr(ip)
-            .set_protcol(super::ipv4::Ipv4Protcol::Icmp)
-            .set_payload(&self.build_to_bytes())
+    pub fn to_ipv4(&self, ip: [u8; 4]) -> anyhow::Result<super::ipv4::Ipv4PacketMut> {
+        // super::ipv4::Ipv4FrameUnchecked::new()
+        //     .set_ipav4addr(ip)
+        //     .set_protcol(super::ipv4::Ipv4Protcol::Icmp)
+        //     .set_payload(&self.build_to_bytes())
+        Ok(super::ipv4::Ipv4PacketMut::new(
+            ip,
+            super::ipv4::Ipv4Protcol::Icmp,
+            self.build_to_bytes(),
+        ))
     }
 }
 
@@ -153,7 +158,7 @@ pub async fn icmp_handler() -> anyhow::Result<()> {
 
     loop {
         let ipv4frame = icmp_receive.recv().await?;
-        let icmp = Icmp::from_buffer(&ipv4frame.get_payload())?;
+        let icmp = Icmp::from_buffer(ipv4frame.get_payload())?;
 
         // Checksum の計算
         if icmp.get_checksum() != 0 {
