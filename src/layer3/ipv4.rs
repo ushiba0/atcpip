@@ -26,7 +26,7 @@ pub static IPV4_RECEIVER: Lazy<
     RwLock::new((ipv4_rx_sender, ipv4_rx_receiver))
 });
 
-const IPV4_HEADER_LEN: usize = 20;
+pub const IPV4_HEADER_LEN: usize = 20;
 const IPV4_MAX_PAYLOAD_SIZE: usize = 65536;
 
 #[derive(Debug, Default, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
@@ -333,6 +333,18 @@ pub async fn send_udp(
     let ip_packet = Ipv4FrameUnchecked::new()
         .set_ipav4addr(target_ip.octets())
         .set_protcol(Ipv4Protcol::Udp)
+        .set_payload(&bytes)?;
+    ip_packet.safely_send().await
+}
+
+pub async fn send_tcp(
+    tcp_pkt: crate::layer4::tcp::TcpPacket,
+    target_ip: &Ipv4Addr,
+) -> anyhow::Result<()> {
+    let bytes = tcp_pkt.to_bytes();
+    let ip_packet = Ipv4FrameUnchecked::new()
+        .set_ipav4addr(target_ip.octets())
+        .set_protcol(Ipv4Protcol::Tcp)
         .set_payload(&bytes)?;
     ip_packet.safely_send().await
 }

@@ -5,6 +5,7 @@ use std::net::Ipv4Addr;
 mod arping;
 mod common;
 mod pingcmd;
+mod syn_flood_attack;
 mod udp_echo;
 mod udp_echo_verify;
 
@@ -41,6 +42,9 @@ enum SecondCommand {
     Server,
     /// TCP Client.
     Client,
+    /// TCP SYN Flood attack.
+    /// !!!!Warning!!!! This is only for testing and learning purposes.
+    SynFloodAttack(AddrAndPort),
     /// UDP echo Server.
     UdpEchoServer(UdpEchoOpts),
     /// UDP echo veririer.
@@ -71,6 +75,17 @@ struct PingCLIOpts {
 struct UdpEchoOpts {
     /// Listen port.
     #[clap(short, long, default_value = "1234")]
+    port: u16,
+}
+
+#[derive(Debug, Parser)]
+struct AddrAndPort {
+    /// Target address.
+    #[clap(short, long)]
+    address: Ipv4Addr,
+
+    /// Target port.
+    #[clap(short, long)]
     port: u16,
 }
 
@@ -124,6 +139,11 @@ async fn main() -> anyhow::Result<()> {
         }
         SecondCommand::UdpEchoVerify => {
             tokio::spawn(async { crate::udp_echo_verify::main(1234).await })
+        }
+        SecondCommand::SynFloodAttack(opts) => {
+            tokio::spawn(
+                async move { crate::syn_flood_attack::main(opts.address, opts.port).await },
+            )
         }
         _ => unimplemented!(),
     };

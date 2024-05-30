@@ -35,7 +35,7 @@ macro_rules! impl_get_slice {
 #[macro_export]
 macro_rules! impl_get_bit {
     ($fn_name:ident, $var:ident, $byte_idx:expr, $bit_idx:expr) => {
-        fn $fn_name(&self) -> bool {
+        pub fn $fn_name(&self) -> bool {
             self.$var[$byte_idx].get_bit($bit_idx)
         }
     };
@@ -64,7 +64,7 @@ macro_rules! impl_set_slice {
 #[macro_export]
 macro_rules! impl_set_bit {
     ($fn_name:ident, $var:ident, $byte_idx:expr, $bit_idx:expr) => {
-        fn $fn_name(&mut self, value: bool) -> &mut Self {
+        pub fn $fn_name(&mut self, value: bool) -> &mut Self {
             self.$var[$byte_idx].set_bit($bit_idx, value);
             self
         }
