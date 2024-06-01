@@ -63,7 +63,9 @@ async fn ipv4_handler_inner() -> anyhow::Result<()> {
 
     loop {
         let ipv4_pkt = ipv4_receive.recv().await?;
-        if ipv4_pkt.get_destination_address_slice() != MY_IP_ADDRESS {
+        if (ipv4_pkt.get_destination_address_slice() != MY_IP_ADDRESS)
+            && (!ipv4_pkt.get_destination_address().is_loopback())
+        {
             continue;
         }
 

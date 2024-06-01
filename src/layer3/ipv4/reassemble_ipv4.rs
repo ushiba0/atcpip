@@ -27,7 +27,7 @@ pub fn reassemble(
         .context("No packtes.")?;
     packets.sort_by_cached_key(|r| r.get_fragment_offset());
 
-    ensure!(packets.first().unwrap().get_fragment_offset()==0);
+    ensure!(packets.first().unwrap().get_fragment_offset() == 0);
 
     let mut concatenated_payload = BytesMut::with_capacity(1500);
     let mut prev_range_end = 0usize;

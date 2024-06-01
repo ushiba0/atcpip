@@ -1,9 +1,10 @@
 use std::net::Ipv4Addr;
 
+use anyhow::Context;
 use bit_field::BitField;
 use bytes::{Bytes, BytesMut};
 
-use crate::common::calc_checksum;
+use crate::{common::calc_checksum, layer2::interface::MY_IP_ADDRESS};
 
 use super::{Ipv4Packet, Ipv4PacketMut};
 
@@ -36,7 +37,17 @@ impl Ipv4Packet {
     }
 
     pub async fn send(&self) -> anyhow::Result<usize> {
-        crate::layer2::ethernet::send_ipv4(self.clone()).await
+        if self.get_destination_address_slice() == [127, 0, 0, 1]
+            || self.get_destination_address_slice() == MY_IP_ADDRESS
+        {
+            super::IPV4_RECEIVER
+                .read()
+                .0
+                .send(self.clone())
+                .context("Loopback send error.")
+        } else {
+            crate::layer2::ethernet::send_ipv4(self.clone()).await
+        }
     }
 
     pub fn get_source_address(&self) -> Ipv4Addr {
